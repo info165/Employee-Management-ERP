@@ -1,0 +1,166 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'info@funscholar.com' ||
+        request.auth.uid == 'admin_master'
+      );
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOperator() {
+      return isAdmin() || (
+        isSignedIn() && exists(/databases/$(database)/documents/operators/$(request.auth.uid))
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Test connection doc for initial boot
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // System Settings
+    match /system_settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Admins and Operators collections
+    match /admins/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /operators/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isOperator();
+      allow create: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'employeeId'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Employee master records
+    match /employees/{employeeId} {
+      allow read: if isOperator() || (
+        isSignedIn() && resource.data.userId == request.auth.uid
+      );
+      allow create: if isAdmin() || isOperator();
+      allow update: if isOperator() || (
+        isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'photoUrl', 'currentAddress', 'permanentAddress',
+          'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation', 'updatedAt'
+        ])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Employee onboarding & verification documents
+    match /employee_documents/{docId} {
+      allow read: if isOperator() || (
+        isSignedIn() && resource.data.userId == request.auth.uid
+      );
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        isOperator() ||
+        request.resource.data.userId == request.auth.uid
+      );
+      allow update: if isOperator() || (
+        isSignedIn() && resource.data.userId == request.auth.uid
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Attendance records
+    match /attendance_records/{recordId} {
+      allow read: if isOperator() || (
+        isSignedIn() && resource.data.userId == request.auth.uid
+      );
+      allow create: if isOperator() || (
+        isSignedIn() && request.resource.data.userId == request.auth.uid
+      );
+      allow update: if isOperator() || (
+        isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'checkOutTime', 'durationMinutes', 'status', 'checkOutLocation', 'remarks', 'updatedAt'
+        ])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Requests (WFH, leave, attendance correction)
+    match /requests/{requestId} {
+      allow read: if isOperator() || (
+        isSignedIn() && resource.data.userId == request.auth.uid
+      );
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isOperator();
+      allow delete: if isAdmin();
+    }
+
+    // STRICT CONFIDENTIALITY: Salary structures accessible ONLY to Super Admin
+    match /salary_structures/{employeeId} {
+      allow read, write: if isAdmin();
+    }
+
+    // STRICT CONFIDENTIALITY: Monthly payroll runs accessible ONLY to Super Admin
+    match /payroll_runs/{runId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Payroll entries (payslips)
+    // Super Admin: full access
+    // Operator: NO ACCESS
+    // Employee: read only their own entry if payslipReleased is true
+    match /payroll_entries/{entryId} {
+      allow read: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        resource.data.payslipReleased == true
+      );
+      allow write: if isAdmin();
+    }
+
+    // ICICI Bank export configuration and history: Super Admin ONLY
+    match /bank_export_configs/{configId} {
+      allow read, write: if isAdmin();
+    }
+
+    // System audit logs: Immutable, readable by Super Admin
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+  }
+}

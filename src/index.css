@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  aside, header, nav, button {
+    display: none !important;
+  }
+  #printable-payslip {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+}

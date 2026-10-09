@@ -1,0 +1,143 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user with role assignments",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "DATA_OPERATOR", "EMPLOYEE"] },
+        "employeeId": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role", "isActive"]
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "Employee master record with onboarding status",
+      "type": "object",
+      "properties": {
+        "employeeNumber": { "type": "string", "maxLength": 30 },
+        "userId": { "type": "string" },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email" },
+        "mobile": { "type": "string", "maxLength": 20 },
+        "department": { "type": "string" },
+        "designation": { "type": "string" },
+        "employmentType": { "type": "string", "enum": ["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN"] },
+        "dateOfJoining": { "type": "string" },
+        "workLocation": { "type": "string" },
+        "assignedWorkMode": { "type": "string", "enum": ["OFFICE", "WFH", "FIELD"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "DRAFT", "PENDING_APPROVAL"] },
+        "onboardingStatus": { "type": "string", "enum": ["DRAFT", "SUBMITTED", "UNDER_REVIEW", "CHANGES_REQUIRED", "APPROVED"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["fullName", "email", "mobile", "department", "designation", "assignedWorkMode", "onboardingStatus"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Daily attendance record with GPS details for field work",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "employeeNumber": { "type": "string" },
+        "date": { "type": "string" },
+        "workMode": { "type": "string", "enum": ["OFFICE", "WFH", "FIELD"] },
+        "checkInTime": { "type": "string" },
+        "checkOutTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["PRESENT", "ABSENT", "HALF_DAY", "LATE", "LEAVE", "WFH", "FIELD_WORK", "HOLIDAY", "WEEKLY_OFF", "INCOMPLETE"] },
+        "durationMinutes": { "type": "number" },
+        "lateArrivalMinutes": { "type": "number" },
+        "isCorrected": { "type": "boolean" }
+      },
+      "required": ["employeeId", "date", "workMode", "status"]
+    },
+    "SalaryStructure": {
+      "title": "SalaryStructure",
+      "description": "Confidential employee salary breakdown restricted to Super Admin",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "basicSalary": { "type": "number" },
+        "hra": { "type": "number" },
+        "specialAllowance": { "type": "number" },
+        "grossSalary": { "type": "number" },
+        "netSalary": { "type": "number" },
+        "bankAccountNumber": { "type": "string" },
+        "bankIfsc": { "type": "string" },
+        "bankName": { "type": "string" }
+      },
+      "required": ["employeeId", "basicSalary", "grossSalary", "netSalary"]
+    },
+    "PayrollRun": {
+      "title": "PayrollRun",
+      "description": "Monthly payroll calculation run",
+      "type": "object",
+      "properties": {
+        "month": { "type": "number" },
+        "year": { "type": "number" },
+        "periodLabel": { "type": "string" },
+        "status": { "type": "string", "enum": ["DRAFT", "CALCULATED", "UNDER_REVIEW", "APPROVED", "EXPORTED", "PAID"] },
+        "totalEmployees": { "type": "number" },
+        "totalNetPayable": { "type": "number" },
+        "locked": { "type": "boolean" }
+      },
+      "required": ["month", "year", "status", "totalNetPayable"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable security and action audit record",
+      "type": "object",
+      "properties": {
+        "actingUserId": { "type": "string" },
+        "actingUserName": { "type": "string" },
+        "actingUserRole": { "type": "string" },
+        "action": { "type": "string" },
+        "targetType": { "type": "string" },
+        "outcome": { "type": "string" },
+        "summary": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["actingUserId", "action", "outcome", "summary", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profile with role definition"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Super admin fast lookup map"
+    },
+    "/operators/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Data operator fast lookup map"
+    },
+    "/employees/{employeeId}": {
+      "schema": { "$ref": "#/entities/Employee" },
+      "description": "Employee master records"
+    },
+    "/attendance_records/{recordId}": {
+      "schema": { "$ref": "#/entities/AttendanceRecord" },
+      "description": "Daily employee attendance punches and GPS coordinates"
+    },
+    "/salary_structures/{employeeId}": {
+      "schema": { "$ref": "#/entities/SalaryStructure" },
+      "description": "Confidential salary structure accessible only to Super Admin"
+    },
+    "/payroll_runs/{runId}": {
+      "schema": { "$ref": "#/entities/PayrollRun" },
+      "description": "Monthly finalized payroll runs"
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "System audit trail entries"
+    }
+  }
+}
