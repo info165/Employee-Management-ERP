@@ -104,9 +104,51 @@
         "timestamp": { "type": "string" }
       },
       "required": ["actingUserId", "action", "outcome", "summary", "timestamp"]
+    },
+    "School": {
+      "title": "School",
+      "description": "Educational institution master record for field visits",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "isActive"]
+    },
+    "ExpenseClaim": {
+      "title": "ExpenseClaim",
+      "description": "Travel and transport expense claim record",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "employeeNumber": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "visitDate": { "type": "string" },
+        "purposeOfVisit": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["DRAFT", "SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED"] },
+        "paymentStatus": { "type": "string", "enum": ["UNPAID", "PENDING_PAYMENT", "PAID"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["employeeId", "schoolName", "visitDate", "totalAmount", "status", "paymentStatus"]
     }
   },
   "firestore": {
+    "/schools/{schoolId}": {
+      "schema": { "$ref": "#/entities/School" },
+      "description": "School partner master directory"
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/ExpenseClaim" },
+      "description": "Employee travel expense claims and receipts"
+    },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
       "description": "User profile with role definition"

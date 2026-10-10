@@ -11,6 +11,7 @@ import {
   MapPin,
   Calendar,
   CheckCircle2,
+  Receipt,
 } from 'lucide-react';
 import { NavigationTab } from '../layout/Sidebar';
 
@@ -26,6 +27,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
     payrollRuns,
     auditLogs,
     systemSettings,
+    expenses,
   } = useAuth();
 
   const totalEmployees = employees.length;
@@ -42,6 +44,9 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
 
   const latestPayroll = payrollRuns[0];
   const pendingRequests = requests.filter((r) => r.status === 'PENDING').length;
+  const pendingExpenses = expenses.filter(
+    (e) => e.status === 'SUBMITTED' || e.status === 'UNDER_REVIEW'
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -63,6 +68,18 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => onNavigate('expenses')}
+              className="px-3.5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              <Receipt className="w-4 h-4 text-slate-300" />
+              <span>Travel Claims</span>
+              {pendingExpenses > 0 && (
+                <span className="px-1.5 py-0.2 bg-amber-400 text-slate-950 font-bold rounded-full text-[10px]">
+                  {pendingExpenses}
+                </span>
+              )}
+            </button>
             <button
               onClick={() => onNavigate('icici-bank')}
               className="px-3.5 py-2 text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
@@ -144,12 +161,18 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
             <BadgeAlert className="w-4 h-4 text-slate-400" />
           </div>
           <div className="text-2xl font-bold text-slate-900">
-            {pendingRequests + pendingOnboarding}
+            {pendingRequests + pendingOnboarding + pendingExpenses}
           </div>
-          <div className="text-xs text-slate-500 mt-2 flex items-center gap-2">
-            <span>{pendingRequests} Requests</span>
+          <div className="text-xs text-slate-500 mt-2 flex items-center gap-1.5 flex-wrap">
+            <span onClick={() => onNavigate('requests')} className="cursor-pointer hover:underline text-slate-700">{pendingRequests} Leave/WFH</span>
             <span>·</span>
-            <span>{pendingOnboarding} Onboarding</span>
+            <span onClick={() => onNavigate('employees')} className="cursor-pointer hover:underline text-slate-700">{pendingOnboarding} Onboard</span>
+            {pendingExpenses > 0 && (
+              <>
+                <span>·</span>
+                <span onClick={() => onNavigate('expenses')} className="cursor-pointer hover:underline text-indigo-600 font-semibold">{pendingExpenses} Travel Claims</span>
+              </>
+            )}
           </div>
         </div>
       </div>

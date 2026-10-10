@@ -27,6 +27,9 @@ export const SystemSettingsView: React.FC = () => {
   const [unpaidLeaveDeductionEnabled, setUnpaidLeaveDeductionEnabled] = useState(systemSettings.unpaidLeaveDeductionEnabled);
   const [lateArrivalDeductionEnabled, setLateArrivalDeductionEnabled] = useState(systemSettings.lateArrivalDeductionEnabled);
   const [lateDeductionThresholdMinutes, setLateDeductionThresholdMinutes] = useState(systemSettings.lateDeductionThresholdMinutes);
+  const [includeApprovedReimbursementsInPayroll, setIncludeApprovedReimbursementsInPayroll] = useState(
+    systemSettings.includeApprovedReimbursementsInPayroll ?? true
+  );
 
   if (!isSuperAdmin) {
     return (
@@ -53,6 +56,7 @@ export const SystemSettingsView: React.FC = () => {
       unpaidLeaveDeductionEnabled,
       lateArrivalDeductionEnabled,
       lateDeductionThresholdMinutes: Number(lateDeductionThresholdMinutes),
+      includeApprovedReimbursementsInPayroll,
     });
     alert('System settings and attendance policies saved successfully.');
   };
@@ -222,6 +226,23 @@ export const SystemSettingsView: React.FC = () => {
                 </span>
                 <span className="text-[11px] text-slate-500">
                   Deducts pro-rata daily salary for recorded absent days and half-days.
+                </span>
+              </div>
+            </label>
+
+            <label className="flex items-start gap-3 p-3 bg-emerald-50/70 rounded-lg border border-emerald-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeApprovedReimbursementsInPayroll}
+                onChange={(e) => setIncludeApprovedReimbursementsInPayroll(e.target.checked)}
+                className="mt-0.5 rounded border-emerald-400"
+              />
+              <div>
+                <span className="font-semibold text-emerald-950 block">
+                  Include Approved Travel Expense Claims in Monthly Payroll Disbursement
+                </span>
+                <span className="text-[11px] text-emerald-800">
+                  Automatically disburses approved employee travel and field visit expense claims with monthly salary and marks them paid upon bank reconciliation.
                 </span>
               </div>
             </label>

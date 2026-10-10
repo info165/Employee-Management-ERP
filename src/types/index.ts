@@ -352,9 +352,87 @@ export interface SystemSettings {
   unpaidLeaveDeductionEnabled: boolean; // default: true
   lateArrivalDeductionEnabled: boolean; // MUST be false by default
   lateDeductionThresholdMinutes: number;
+  includeApprovedReimbursementsInPayroll?: boolean; // default: false
   
   holidays: Array<{ date: string; name: string }>;
   weeklyOffDays: string[]; // ['Sunday']
+}
+
+export interface School {
+  id: string;
+  name: string;
+  category: string; // e.g. "Class", "Lab", "Institution"
+  city: string;
+  address?: string;
+  contactPerson?: string;
+  contactPhone?: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export type TransportMode =
+  | 'Own Vehicle'
+  | 'Bus'
+  | 'Train'
+  | 'Taxi/Cab'
+  | 'Auto'
+  | 'Metro'
+  | 'Other';
+
+export interface TransportLeg {
+  id: string;
+  mode: TransportMode;
+  amount: number;
+  receiptName?: string;
+  receiptUrl?: string;
+  notes?: string;
+}
+
+export type ExpenseStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'UNDER_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED';
+
+export type ExpensePaymentStatus = 'UNPAID' | 'PENDING_PAYMENT' | 'PAID';
+
+export interface ExpenseClaim {
+  id: string; // e.g. EXP-2026-0001
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  userId?: string;
+  schoolId: string;
+  schoolName: string;
+  schoolCategory?: string;
+  visitDate: string; // YYYY-MM-DD
+  purposeOfVisit: string;
+  notes?: string;
+  transportLegs: TransportLeg[];
+  totalAmount: number;
+  status: ExpenseStatus;
+  paymentStatus: ExpensePaymentStatus;
+  receiptUrls?: string[];
+  submittedAt?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewerComments?: string;
+  paidAt?: string;
+  paidBy?: string;
+  paymentReference?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IciciTxtBatchConfig {
+  corporateId: string; // e.g. FUNSCHOL03072019
+  debitAccountNumber: string; // 12-digit, e.g. 627505030081
+  externalReference: string; // e.g. Cut-off
+  transactionDate: string; // YYYY-MM-DD
+  batchRemarks: string; // Max 30 chars, e.g. Salary Payment for September
+  dateFormat: 'MM/DD/YYYY' | 'DD/MM/YYYY';
+  dateFormatConfirmed: boolean;
 }
 
 export interface AuditLog {

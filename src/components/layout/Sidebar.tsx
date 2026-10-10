@@ -15,15 +15,19 @@ import {
   CalendarCheck,
   FileText,
   BadgeAlert,
+  Receipt,
+  GraduationCap,
 } from 'lucide-react';
 
 export type NavigationTab =
   | 'dashboard'
   | 'employees'
+  | 'schools'
   | 'onboard-new'
   | 'attendance'
   | 'clock-in'
   | 'requests'
+  | 'expenses'
   | 'salary-structures'
   | 'payroll-runs'
   | 'icici-bank'
@@ -39,7 +43,11 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => {
-  const { activeRole, isSuperAdmin, isDataOperator, isEmployee } = useAuth();
+  const { activeRole, isSuperAdmin, isDataOperator, isEmployee, expenses } = useAuth();
+
+  const pendingExpensesCount = expenses.filter(
+    (e) => e.status === 'SUBMITTED' || e.status === 'UNDER_REVIEW'
+  ).length;
 
   return (
     <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 min-h-[calc(100vh-4rem)] border-r border-slate-800">
@@ -92,6 +100,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
                 >
                   <Users className="w-4 h-4 text-slate-400" />
                   <span>Employee Directory</span>
+                </button>
+
+                <button
+                  onClick={() => onSelectTab('schools')}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                    currentTab === 'schools'
+                      ? 'bg-slate-800 text-white font-semibold'
+                      : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                  }`}
+                >
+                  <GraduationCap className="w-4 h-4 text-slate-400" />
+                  <span>Schools & Field Sites</span>
                 </button>
 
                 <button
@@ -164,6 +184,25 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
             >
               <BadgeAlert className="w-4 h-4 text-slate-400" />
               <span>{isEmployee ? 'My Leave & WFH' : 'Requests & Approvals'}</span>
+            </button>
+
+            <button
+              onClick={() => onSelectTab('expenses')}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                currentTab === 'expenses'
+                  ? 'bg-slate-800 text-white font-semibold'
+                  : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Receipt className="w-4 h-4 text-slate-400" />
+                <span>{isEmployee ? 'My Travel Claims' : 'Travel Expenses'}</span>
+              </div>
+              {!isEmployee && pendingExpensesCount > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30 rounded-full font-mono">
+                  {pendingExpensesCount}
+                </span>
+              )}
             </button>
           </div>
         </div>

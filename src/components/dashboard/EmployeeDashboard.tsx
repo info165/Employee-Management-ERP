@@ -11,6 +11,7 @@ import {
   AlertCircle,
   FileCheck2,
   ArrowRight,
+  Receipt,
 } from 'lucide-react';
 import { NavigationTab } from '../layout/Sidebar';
 
@@ -25,9 +26,13 @@ export const EmployeeDashboard: React.FC<Props> = ({ onNavigate, onOpenPayslip }
     attendanceRecords,
     requests,
     payrollEntries,
+    expenses,
   } = useAuth();
 
   const emp = currentEmployee;
+  const myClaims = expenses.filter(
+    (c) => c.employeeId === emp?.id || c.employeeNumber === emp?.employeeNumber
+  );
   const todayStr = new Date().toISOString().split('T')[0];
   const todayRecord = attendanceRecords.find(
     (r) => r.employeeId === emp?.id && r.date === todayStr
@@ -89,6 +94,13 @@ export const EmployeeDashboard: React.FC<Props> = ({ onNavigate, onOpenPayslip }
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => onNavigate('expenses')}
+              className="px-3.5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-xs border border-slate-700"
+            >
+              <Receipt className="w-4 h-4 text-emerald-400" />
+              <span>Travel Claims ({myClaims.length})</span>
+            </button>
             <button
               onClick={() => onNavigate('clock-in')}
               className="px-4 py-2 text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg transition-colors flex items-center gap-2 shadow-xs"

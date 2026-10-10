@@ -18,6 +18,8 @@ import { AuditLogViewer } from './components/audit/AuditLogViewer';
 import { SystemSettingsView } from './components/settings/SystemSettingsView';
 import { MyDocuments } from './components/employee/MyDocuments';
 import { MyPayslips } from './components/employee/MyPayslips';
+import { ExpenseClaimsManager } from './components/expenses/ExpenseClaimsManager';
+import { SchoolsDirectory } from './components/schools/SchoolsDirectory';
 import { ShieldCheck, UserCheck, User } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
@@ -50,6 +52,8 @@ const MainLayout: React.FC = () => {
               <EmployeeDirectory onOpenNewOnboarding={() => setCurrentTab('onboard-new')} />
             )}
 
+            {currentTab === 'schools' && <SchoolsDirectory />}
+
             {currentTab === 'onboard-new' && (
               <OnboardingForm
                 onCancel={() => setCurrentTab('employees')}
@@ -62,6 +66,8 @@ const MainLayout: React.FC = () => {
             {currentTab === 'attendance' && <AttendanceRegister />}
 
             {currentTab === 'requests' && <RequestManager />}
+
+            {currentTab === 'expenses' && <ExpenseClaimsManager />}
 
             {currentTab === 'salary-structures' && <SalaryStructures />}
 

@@ -118,6 +118,28 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Schools directory
+    match /schools/{schoolId} {
+      allow read: if isSignedIn();
+      allow write: if isOperator() || isAdmin();
+    }
+
+    // Expense claims
+    match /expenses/{expenseId} {
+      allow read: if isOperator() || (
+        isSignedIn() && resource.data.userId == request.auth.uid
+      );
+      allow create: if isSignedIn() && (
+        request.resource.data.userId == request.auth.uid || isOperator()
+      );
+      allow update: if isOperator() || (
+        isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        resource.data.status == 'DRAFT'
+      );
+      allow delete: if isAdmin();
+    }
+
     // Requests (WFH, leave, attendance correction)
     match /requests/{requestId} {
       allow read: if isOperator() || (

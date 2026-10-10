@@ -1,6 +1,6 @@
 {
   "name": "Staff Management & Payroll Portal",
-  "description": "Comprehensive employee lifecycle, attendance management, salary structures, payroll calculations, and ICICI Bank salary payment file generation for Indian organizations.",
+  "description": "Comprehensive employee lifecycle, attendance management, salary structures, payroll calculations, and corporate bank salary payment file generation for Indian organizations.",
   "requestFramePermissions": [
     "geolocation"
   ],

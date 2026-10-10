@@ -14,6 +14,9 @@ import {
   EmployeeRequest,
   WorkMode,
   AttendanceLocation,
+  School,
+  ExpenseClaim,
+  IciciTxtBatchConfig,
 } from '../types';
 import {
   INITIAL_SYSTEM_SETTINGS,
@@ -26,6 +29,9 @@ import {
   INITIAL_PAYROLL_ENTRIES,
   INITIAL_ICICI_CONFIG,
   INITIAL_AUDIT_LOGS,
+  INITIAL_SCHOOLS,
+  INITIAL_EXPENSES,
+  INITIAL_ICICI_TXT_CONFIG,
 } from '../lib/seedData';
 import { auth, db, testConnection } from '../lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged, User } from 'firebase/auth';
@@ -56,6 +62,9 @@ interface AuthContextType {
   iciciConfig: IciciBankExportConfig;
   systemSettings: SystemSettings;
   auditLogs: AuditLog[];
+  schools: School[];
+  expenses: ExpenseClaim[];
+  iciciTxtConfig: IciciTxtBatchConfig;
 
   // Mutators
   addEmployee: (emp: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'accountActivated'>) => Promise<Employee>;
@@ -63,7 +72,16 @@ interface AuthContextType {
   approveOnboarding: (id: string, customNumber?: string) => Promise<{ employeeNumber: string }>;
   uploadDocument: (doc: Omit<EmployeeDocument, 'id' | 'uploadedAt'>) => Promise<void>;
   updateDocumentStatus: (docId: string, status: 'VERIFIED' | 'REJECTED', remarks?: string) => Promise<void>;
-  
+
+  // Schools & Expenses
+  addSchool: (school: Omit<School, 'id' | 'createdAt'>) => Promise<School>;
+  updateSchool: (id: string, updates: Partial<School>) => Promise<void>;
+  submitExpense: (claim: Omit<ExpenseClaim, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'paymentStatus' | 'totalAmount' | 'employeeId' | 'employeeNumber' | 'employeeName' | 'userId'>) => Promise<ExpenseClaim>;
+  saveExpenseDraft: (claim: Omit<ExpenseClaim, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'paymentStatus' | 'totalAmount' | 'employeeId' | 'employeeNumber' | 'employeeName' | 'userId'>) => Promise<ExpenseClaim>;
+  reviewExpense: (expenseId: string, status: 'APPROVED' | 'REJECTED', comments?: string) => Promise<void>;
+  markExpensePaid: (expenseId: string, paymentRef?: string) => Promise<void>;
+  updateIciciTxtConfig: (cfg: Partial<IciciTxtBatchConfig>) => Promise<void>;
+
   // Attendance actions
   clockIn: (workMode: WorkMode, location?: AttendanceLocation, remarks?: string) => Promise<AttendanceRecord>;
   clockOut: (location?: AttendanceLocation, remarks?: string) => Promise<AttendanceRecord>;
@@ -118,6 +136,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [iciciConfig, setIciciConfig] = useState<IciciBankExportConfig>(INITIAL_ICICI_CONFIG);
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(INITIAL_SYSTEM_SETTINGS);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(INITIAL_AUDIT_LOGS);
+  const [schools, setSchools] = useState<School[]>(INITIAL_SCHOOLS);
+  const [expenses, setExpenses] = useState<ExpenseClaim[]>(INITIAL_EXPENSES);
+  const [iciciTxtConfig, setIciciTxtConfig] = useState<IciciTxtBatchConfig>(INITIAL_ICICI_TXT_CONFIG);
 
   // Active current profile
   const [currentUser, setCurrentUser] = useState<UserProfile>({
@@ -665,6 +686,141 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
   };
 
+  const addSchool = async (schoolData: Omit<School, 'id' | 'createdAt'>): Promise<School> => {
+    if (isEmployee) throw new Error('Unauthorized');
+    const newSchool: School = {
+      ...schoolData,
+      id: `sch-${Date.now().toString(36)}`,
+      createdAt: new Date().toISOString(),
+    };
+    setSchools((prev) => [newSchool, ...prev]);
+    logAction('SCHOOL_ADDED', 'SCHOOL', `Added school partner record: ${newSchool.name}`, newSchool.id);
+    return newSchool;
+  };
+
+  const updateSchool = async (id: string, updates: Partial<School>): Promise<void> => {
+    if (isEmployee) throw new Error('Unauthorized');
+    setSchools((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
+    );
+    logAction('SCHOOL_UPDATED', 'SCHOOL', `Updated school record`, id);
+  };
+
+  const submitExpense = async (
+    claimData: Omit<
+      ExpenseClaim,
+      'id' | 'createdAt' | 'updatedAt' | 'status' | 'paymentStatus' | 'totalAmount' | 'employeeId' | 'employeeNumber' | 'employeeName' | 'userId'
+    >
+  ): Promise<ExpenseClaim> => {
+    const emp = currentEmployee;
+    const totalAmount = claimData.transportLegs.reduce((sum, leg) => sum + (Number(leg.amount) || 0), 0);
+    const nextSeq = expenses.length + 1;
+    const newClaim: ExpenseClaim = {
+      ...claimData,
+      id: `EXP-2026-${String(nextSeq).padStart(4, '0')}`,
+      employeeId: emp?.id || 'emp-sanjeet',
+      employeeNumber: emp?.employeeNumber || 'EMP-2026-0005',
+      employeeName: emp?.fullName || currentUser?.displayName || 'SANJEET SINGH',
+      userId: currentUser?.uid,
+      totalAmount,
+      status: 'SUBMITTED',
+      paymentStatus: 'PENDING_PAYMENT',
+      submittedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setExpenses((prev) => [newClaim, ...prev]);
+    logAction(
+      'EXPENSE_SUBMITTED',
+      'EXPENSE',
+      `Submitted expense claim ${newClaim.id} for ₹${totalAmount} (${newClaim.schoolName})`,
+      newClaim.id
+    );
+    return newClaim;
+  };
+
+  const saveExpenseDraft = async (
+    claimData: Omit<
+      ExpenseClaim,
+      'id' | 'createdAt' | 'updatedAt' | 'status' | 'paymentStatus' | 'totalAmount' | 'employeeId' | 'employeeNumber' | 'employeeName' | 'userId'
+    >
+  ): Promise<ExpenseClaim> => {
+    const emp = currentEmployee;
+    const totalAmount = claimData.transportLegs.reduce((sum, leg) => sum + (Number(leg.amount) || 0), 0);
+    const nextSeq = expenses.length + 1;
+    const draftClaim: ExpenseClaim = {
+      ...claimData,
+      id: `EXP-2026-${String(nextSeq).padStart(4, '0')}`,
+      employeeId: emp?.id || 'emp-sanjeet',
+      employeeNumber: emp?.employeeNumber || 'EMP-2026-0005',
+      employeeName: emp?.fullName || currentUser?.displayName || 'SANJEET SINGH',
+      userId: currentUser?.uid,
+      totalAmount,
+      status: 'DRAFT',
+      paymentStatus: 'UNPAID',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setExpenses((prev) => [draftClaim, ...prev]);
+    logAction('EXPENSE_DRAFT_SAVED', 'EXPENSE', `Saved expense claim draft ${draftClaim.id}`, draftClaim.id);
+    return draftClaim;
+  };
+
+  const reviewExpense = async (
+    expenseId: string,
+    status: 'APPROVED' | 'REJECTED',
+    comments?: string
+  ): Promise<void> => {
+    if (isEmployee) throw new Error('Unauthorized');
+    setExpenses((prev) =>
+      prev.map((c) => {
+        if (c.id !== expenseId) return c;
+        return {
+          ...c,
+          status,
+          paymentStatus: status === 'APPROVED' ? 'PENDING_PAYMENT' : 'UNPAID',
+          reviewedAt: new Date().toISOString(),
+          reviewedBy: currentUser?.email || 'operator@funscholar.com',
+          reviewerComments: comments,
+          updatedAt: new Date().toISOString(),
+        };
+      })
+    );
+    logAction(
+      status === 'APPROVED' ? 'EXPENSE_APPROVED' : 'EXPENSE_REJECTED',
+      'EXPENSE',
+      `${status} expense claim ${expenseId}${comments ? `: ${comments}` : ''}`,
+      expenseId
+    );
+  };
+
+  const markExpensePaid = async (expenseId: string, paymentRef?: string): Promise<void> => {
+    if (!isSuperAdmin) throw new Error('Unauthorized');
+    setExpenses((prev) =>
+      prev.map((c) => {
+        if (c.id !== expenseId) return c;
+        return {
+          ...c,
+          paymentStatus: 'PAID',
+          paidAt: new Date().toISOString(),
+          paidBy: currentUser?.email || 'info@funscholar.com',
+          paymentReference: paymentRef || `ICICI-REF-${Date.now().toString(36).toUpperCase()}`,
+          updatedAt: new Date().toISOString(),
+        };
+      })
+    );
+    logAction('EXPENSE_PAID', 'EXPENSE', `Marked expense claim ${expenseId} as PAID`, expenseId);
+  };
+
+  const updateIciciTxtConfig = async (cfg: Partial<IciciTxtBatchConfig>): Promise<void> => {
+    if (!isSuperAdmin) throw new Error('Unauthorized');
+    setIciciTxtConfig((prev) => ({
+      ...prev,
+      ...cfg,
+    }));
+    logAction('ICICI_TXT_CONFIG_UPDATED', 'BANK_EXPORT', 'Updated ICICI CIB TXT batch configuration');
+  };
+
   const updateSystemSettings = async (newSettings: Partial<SystemSettings>) => {
     if (!isSuperAdmin) throw new Error('Unauthorized');
     setSystemSettings((prev) => ({
@@ -697,6 +853,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         iciciConfig,
         systemSettings,
         auditLogs: isSuperAdmin ? auditLogs : [],               // Strict audit log viewing for Super Admin
+        schools,
+        expenses,
+        iciciTxtConfig,
+        addSchool,
+        updateSchool,
+        submitExpense,
+        saveExpenseDraft,
+        reviewExpense,
+        markExpensePaid,
+        updateIciciTxtConfig,
         addEmployee,
         updateEmployee,
         approveOnboarding,

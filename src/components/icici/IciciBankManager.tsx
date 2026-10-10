@@ -4,6 +4,7 @@ import {
   validateAndGenerateIciciFile,
   BankReconciliationResult,
 } from '../../lib/iciciGenerator';
+import { generateIciciTxtFile } from '../../lib/iciciTxtGenerator';
 import { formatINR, formatDateIndian, downloadCsv, downloadTxt } from '../../lib/exportUtils';
 import {
   Landmark,
@@ -18,6 +19,8 @@ import {
   FileSpreadsheet,
   RefreshCw,
   AlertOctagon,
+  FileCode,
+  Copy,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -29,11 +32,13 @@ export const IciciBankManager: React.FC = () => {
     saveIciciConfig,
     recordBankExport,
     isSuperAdmin,
+    iciciTxtConfig,
+    updateIciciTxtConfig,
   } = useAuth();
 
   const [activeTab, setActiveTab] = useState<
-    'generate' | 'upload_source' | 'template_config' | 'export_history'
-  >('generate');
+    'icici_txt' | 'generate' | 'upload_source' | 'template_config' | 'export_history'
+  >('icici_txt');
 
   // Selected payroll run
   const approvedRuns = payrollRuns.filter((r) => r.status === 'APPROVED' || r.status === 'PAID');
@@ -73,12 +78,38 @@ export const IciciBankManager: React.FC = () => {
     (e) => e.payrollRunId === currentRun?.id
   );
 
-  // Run ICICI validation engine
+  // Run ICICI validation engine (CSV/Standard)
   const validationResult: BankReconciliationResult = validateAndGenerateIciciFile(
     iciciConfig,
     entriesForRun,
     currentRun?.periodLabel || 'Current_Period'
   );
+
+  // Run Official ICICI CIB Bulk Upload TXT Generator
+  const txtValidation = generateIciciTxtFile(
+    iciciTxtConfig,
+    entriesForRun.map((e) => ({
+      employeeNumber: e.employeeNumber,
+      employeeName: e.employeeName,
+      bankAccountNumber: e.bankAccountNumber,
+      bankIfsc: e.bankIfsc,
+      netPayable: e.netPayable,
+      remarks: 'Salary',
+    }))
+  );
+
+  const handleDownloadTxtFile = () => {
+    downloadTxt(txtValidation.fileName, txtValidation.rawTxtContent);
+    recordBankExport({
+      id: `exp-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      fileName: txtValidation.fileName,
+      payrollPeriod: currentRun?.periodLabel || 'N/A',
+      totalRows: txtValidation.totalRecords,
+      totalAmount: txtValidation.totalAmount,
+      exportedBy: 'info@funscholar.com',
+    });
+  };
 
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,7 +227,22 @@ export const IciciBankManager: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs">
+      <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs">
+        <button
+          onClick={() => setActiveTab('icici_txt')}
+          className={`px-4 py-2 font-medium rounded-lg transition-colors flex items-center gap-2 ${
+            activeTab === 'icici_txt'
+              ? 'bg-white text-slate-900 shadow-xs font-semibold'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <FileCode className="w-4 h-4 text-emerald-600" />
+          <span>Official ICICI CIB TXT File</span>
+          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-mono font-bold">
+            FHR/MDR
+          </span>
+        </button>
+
         <button
           onClick={() => setActiveTab('generate')}
           className={`px-4 py-2 font-medium rounded-lg transition-colors flex items-center gap-2 ${
@@ -206,7 +252,7 @@ export const IciciBankManager: React.FC = () => {
           }`}
         >
           <Landmark className="w-4 h-4 text-amber-600" />
-          <span>Generate from Approved Payroll</span>
+          <span>CSV/Excel Format Generator</span>
         </button>
 
         <button
@@ -245,6 +291,313 @@ export const IciciBankManager: React.FC = () => {
           <span>Export History ({iciciConfig.history?.length || 0})</span>
         </button>
       </div>
+
+      {/* TAB 0: Official ICICI CIB TXT File Converter */}
+      {activeTab === 'icici_txt' && (
+        <div className="space-y-6">
+          {/* Header Controls and Batch Details */}
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-2xs space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 bg-emerald-100 text-emerald-800 rounded-md">
+                    <FileCode className="w-4 h-4" />
+                  </span>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Official ICICI CIB Corporate Salary TXT Converter
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Generates the exact pipe-delimited <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-800">FHR|MDR|MCW/MCO^</code> formatted upload file required by ICICI Corporate Internet Banking.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadTxtFile}
+                  disabled={!txtValidation.isValid}
+                  className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 shadow-xs ${
+                    txtValidation.isValid
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download ICICI .TXT File</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Batch Parameters Form */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-slate-50/70 p-4 rounded-xl border border-slate-200">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Corporate ID *
+                </label>
+                <input
+                  type="text"
+                  value={iciciTxtConfig.corporateId}
+                  onChange={(e) => updateIciciTxtConfig({ corporateId: e.target.value })}
+                  placeholder="e.g. FUNSCHOL03072019"
+                  className="w-full px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-300 rounded-md text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Debit Account Number (12 digits) *
+                </label>
+                <input
+                  type="text"
+                  value={iciciTxtConfig.debitAccountNumber}
+                  onChange={(e) => updateIciciTxtConfig({ debitAccountNumber: e.target.value })}
+                  placeholder="e.g. 627505030081"
+                  className="w-full px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-300 rounded-md text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Transaction Date *
+                </label>
+                <input
+                  type="date"
+                  value={iciciTxtConfig.transactionDate}
+                  onChange={(e) => updateIciciTxtConfig({ transactionDate: e.target.value })}
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  External Reference
+                </label>
+                <input
+                  type="text"
+                  value={iciciTxtConfig.externalReference}
+                  onChange={(e) => updateIciciTxtConfig({ externalReference: e.target.value })}
+                  placeholder="e.g. Cut-off"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Batch Remarks (Max 30 Chars)
+                </label>
+                <input
+                  type="text"
+                  maxLength={30}
+                  value={iciciTxtConfig.batchRemarks}
+                  onChange={(e) => updateIciciTxtConfig({ batchRemarks: e.target.value })}
+                  placeholder="Salary Payment for September"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Bank Date Format *
+                </label>
+                <div className="flex items-center gap-4 mt-1">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-800">
+                    <input
+                      type="radio"
+                      checked={iciciTxtConfig.dateFormat === 'MM/DD/YYYY'}
+                      onChange={() => updateIciciTxtConfig({ dateFormat: 'MM/DD/YYYY' })}
+                      className="text-slate-900"
+                    />
+                    <span>MM/DD/YYYY (Default ICICI)</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-slate-800">
+                    <input
+                      type="radio"
+                      checked={iciciTxtConfig.dateFormat === 'DD/MM/YYYY'}
+                      onChange={() => updateIciciTxtConfig({ dateFormat: 'DD/MM/YYYY' })}
+                      className="text-slate-900"
+                    />
+                    <span>DD/MM/YYYY</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Reconciliation Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider block">
+                  Beneficiaries
+                </span>
+                <span className="text-xl font-bold font-mono text-slate-900 mt-1 block">
+                  {txtValidation.totalRecords}
+                </span>
+                <span className="text-[10px] text-slate-500">records</span>
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider block">
+                  FHR Count
+                </span>
+                <span className="text-xl font-bold font-mono text-slate-900 mt-1 block">
+                  {txtValidation.fhrRecordCount}
+                </span>
+                <span className="text-[10px] text-slate-500">Beneficiaries + 1 MDR</span>
+              </div>
+
+              <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                <span className="text-[10px] font-medium text-blue-700 uppercase tracking-wider block">
+                  ICICI (MCW / WIB)
+                </span>
+                <span className="text-xl font-bold font-mono text-blue-800 mt-1 block">
+                  {txtValidation.wibCount}
+                </span>
+                <span className="text-[10px] text-blue-600">Within bank</span>
+              </div>
+
+              <div className="bg-amber-50 p-3 rounded-lg border border-amber-200">
+                <span className="text-[10px] font-medium text-amber-700 uppercase tracking-wider block">
+                  NEFT (MCO / NFT)
+                </span>
+                <span className="text-xl font-bold font-mono text-amber-800 mt-1 block">
+                  {txtValidation.mcoCount}
+                </span>
+                <span className="text-[10px] text-amber-600">Other banks</span>
+              </div>
+
+              <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 col-span-2 sm:col-span-1">
+                <span className="text-[10px] font-medium text-emerald-700 uppercase tracking-wider block">
+                  Total Payable
+                </span>
+                <span className="text-lg font-bold font-mono text-emerald-800 mt-1 block">
+                  {formatINR(txtValidation.totalAmount)}
+                </span>
+                <span className="text-[10px] text-emerald-600">Exact sum</span>
+              </div>
+            </div>
+
+            {/* Error notifications */}
+            {txtValidation.errors.length > 0 && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs space-y-1">
+                <div className="font-semibold flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-rose-600" />
+                  <span>Validation Errors:</span>
+                </div>
+                <ul className="list-disc pl-5 space-y-0.5 text-[11px]">
+                  {txtValidation.errors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* Beneficiaries Validation Table */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
+                Beneficiary Records & Validation Status ({txtValidation.beneficiaries.length})
+              </h3>
+              <span className="text-xs text-slate-500 font-mono">
+                Source Run: {currentRun?.periodLabel}
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                  <tr>
+                    <th className="py-2.5 px-3">Emp ID</th>
+                    <th className="py-2.5 px-3">Beneficiary Name</th>
+                    <th className="py-2.5 px-3">Account Number</th>
+                    <th className="py-2.5 px-3">IFSC</th>
+                    <th className="py-2.5 px-3 text-center">Type</th>
+                    <th className="py-2.5 px-3 text-right">Amount (₹)</th>
+                    <th className="py-2.5 px-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                  {txtValidation.beneficiaries.map((b, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/60 font-sans">
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
+                        {b.employeeNumber}
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-900">
+                        {b.beneficiaryName}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-[11px]">
+                        {b.beneficiaryAccount}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-[11px]">
+                        {b.ifsc}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            b.transactionType === 'WIB'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {b.transactionType === 'WIB' ? 'WIB (ICICI MCW)' : 'NFT (NEFT MCO)'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                        {formatINR(b.amount)}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        {b.status === 'VALID' ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold text-[11px]">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Valid</span>
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 text-rose-700 font-semibold text-[11px]"
+                            title={b.errors.join(', ')}
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <span>{b.errors[0] || 'Error'}</span>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Raw Generated TXT File Preview */}
+          <div className="bg-slate-900 text-slate-100 rounded-xl p-5 border border-slate-800 shadow-sm space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-amber-400 font-bold">
+                  {txtValidation.fileName}
+                </span>
+                <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded">
+                  ASCII / CRLF / Pipe Delimited
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(txtValidation.rawTxtContent);
+                  alert('Copied ICICI TXT content to clipboard.');
+                }}
+                className="inline-flex items-center gap-1 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded transition-colors"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy Raw TXT</span>
+              </button>
+            </div>
+
+            <pre className="p-3 bg-slate-950 rounded-lg text-emerald-400 font-mono text-[11px] overflow-x-auto leading-relaxed border border-slate-800 max-h-64">
+              {txtValidation.rawTxtContent}
+            </pre>
+          </div>
+        </div>
+      )}
 
       {/* TAB 1: Generate & Reconcile from Approved Payroll */}
       {activeTab === 'generate' && (

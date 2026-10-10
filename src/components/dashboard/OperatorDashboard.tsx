@@ -10,6 +10,7 @@ import {
   MapPin,
   CheckCircle2,
   FileQuestion,
+  Receipt,
 } from 'lucide-react';
 import { NavigationTab } from '../layout/Sidebar';
 
@@ -23,6 +24,7 @@ export const OperatorDashboard: React.FC<Props> = ({ onNavigate }) => {
     documents,
     attendanceRecords,
     requests,
+    expenses,
   } = useAuth();
 
   const totalEmployees = employees.length;
@@ -56,6 +58,13 @@ export const OperatorDashboard: React.FC<Props> = ({ onNavigate }) => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => onNavigate('expenses')}
+              className="px-3.5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              <Receipt className="w-4 h-4 text-slate-300" />
+              <span>Review Claims</span>
+            </button>
             <button
               onClick={() => onNavigate('attendance')}
               className="px-3.5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
