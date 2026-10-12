@@ -51,8 +51,11 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
   // nothing is auto-generated, so the audit trail only logs real uploads.
   const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [panNumber, setPanNumber] = useState('');
+  const [accountHolderName, setAccountHolderName] = useState('');
+  const [bankName, setBankName] = useState('ICICI Bank');
   const [bankAccNumber, setBankAccNumber] = useState('');
-  const [bankIfsc, setBankIfsc] = useState('');
+  const [bankIfsc, setBankIfsc] = useState('ICIC0000002');
+  const [transactionRoute, setTransactionRoute] = useState<'WIB' | 'NEFT'>('WIB');
   const [aadhaarFile, setAadhaarFile] = useState<File | null>(null);
   const [panFile, setPanFile] = useState<File | null>(null);
   const [chequeFile, setChequeFile] = useState<File | null>(null);
@@ -63,6 +66,9 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
     setSubmitting(true);
     setUploadError(null);
     try {
+      const isWib = bankIfsc.trim().toUpperCase().startsWith('ICIC');
+      const resolvedRoute: 'WIB' | 'NEFT' = transactionRoute || (isWib ? 'WIB' : 'NEFT');
+
       const newEmp = await addEmployee({
         fullName,
         email,
@@ -85,6 +91,15 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
         weeklyOff: ['Sunday'],
         employmentStatus: 'PROBATION',
         onboardingStatus: 'UNDER_REVIEW', // Ready for Super Admin review & approval
+        bankDetails: bankAccNumber.trim() ? {
+          accountHolderName: accountHolderName.trim() || fullName,
+          bankName: bankName.trim() || (isWib ? 'ICICI Bank' : 'Other Bank'),
+          bankAccountNumber: String(bankAccNumber).trim(),
+          bankIfsc: bankIfsc.trim().toUpperCase(),
+          transactionRoute: resolvedRoute,
+          verificationStatus: 'PENDING',
+          effectiveDate: dateOfJoining || new Date().toISOString().split('T')[0],
+        } : undefined,
       });
 
       // Upload only the statutory documents that were actually attached.
@@ -502,6 +517,49 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
 
                 <div>
                   <label className="block font-medium text-slate-700 mb-1">
+                    Beneficiary / Account Holder Name *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={fullName || 'Full Name as per Bank Passbook'}
+                    value={accountHolderName}
+                    onChange={(e) => setAccountHolderName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">
+                    Bank Name *
+                  </label>
+                  <select
+                    value={bankName}
+                    onChange={(e) => {
+                      const selected = e.target.value;
+                      setBankName(selected);
+                      if (selected === 'ICICI Bank') {
+                        setBankIfsc('ICIC0000002');
+                        setTransactionRoute('WIB');
+                      } else {
+                        if (bankIfsc.startsWith('ICIC')) setBankIfsc('');
+                        setTransactionRoute('NEFT');
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none"
+                  >
+                    <option value="ICICI Bank">ICICI Bank (Direct Within-Bank WIB)</option>
+                    <option value="HDFC Bank">HDFC Bank (NEFT)</option>
+                    <option value="State Bank of India">State Bank of India (NEFT)</option>
+                    <option value="Axis Bank">Axis Bank (NEFT)</option>
+                    <option value="Kotak Mahindra Bank">Kotak Mahindra Bank (NEFT)</option>
+                    <option value="Punjab National Bank">Punjab National Bank (NEFT)</option>
+                    <option value="Bank of Baroda">Bank of Baroda (NEFT)</option>
+                    <option value="Other Bank">Other Scheduled Commercial Bank (NEFT)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">
                     Salary Bank Account Number *
                   </label>
                   <input
@@ -511,6 +569,9 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
                     onChange={(e) => setBankAccNumber(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono focus:outline-none"
                   />
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Account numbers are strictly stored as strings to preserve leading zeros.
+                  </p>
                 </div>
 
                 <div>
@@ -522,9 +583,25 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
                     maxLength={11}
                     placeholder="e.g. ICIC0000002"
                     value={bankIfsc}
-                    onChange={(e) => setBankIfsc(e.target.value.toUpperCase())}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase();
+                      setBankIfsc(val);
+                      if (val.startsWith('ICIC')) {
+                        setTransactionRoute('WIB');
+                      } else {
+                        setTransactionRoute('NEFT');
+                      }
+                    }}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono uppercase focus:outline-none"
                   />
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] text-slate-500 font-sans">Payment Route:</span>
+                    <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                      transactionRoute === 'WIB' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {transactionRoute === 'WIB' ? 'WIB (ICICI Within-Bank Transfer)' : 'NEFT (Other Bank Transfer)'}
+                    </span>
+                  </div>
                 </div>
               </div>
 

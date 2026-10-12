@@ -39,6 +39,7 @@ export const PayrollRuns: React.FC = () => {
     attendanceRecords,
     systemSettings,
     expenses,
+    employees,
     iciciTxtConfig,
     createPayrollRun,
     updatePayrollStatus,
@@ -59,13 +60,9 @@ export const PayrollRuns: React.FC = () => {
   const [showIciciModal, setShowIciciModal] = useState(false);
   const [txtCopied, setTxtCopied] = useState(false);
 
-  // Active run based on selected month & year (or first available run)
+  // Active run strictly based on selected month & year (no silent fallback to prior period)
   const activeRun = useMemo(() => {
-    return (
-      payrollRuns.find((r) => r.month === calcMonth && r.year === calcYear) ||
-      payrollRuns[0] ||
-      null
-    );
+    return payrollRuns.find((r) => r.month === calcMonth && r.year === calcYear) || null;
   }, [payrollRuns, calcMonth, calcYear]);
 
   // Entries for the active run
@@ -188,31 +185,66 @@ export const PayrollRuns: React.FC = () => {
   const handleRunCalculation = async () => {
     setCalculating(true);
     try {
+      const activeEmployees = employees.filter(
+        (e) => e.employmentStatus === 'ACTIVE' || e.onboardingStatus === 'APPROVED'
+      );
+
       const entries: PayrollEntry[] = [];
 
-      for (const struct of salaryStructures) {
+      for (const emp of activeEmployees) {
+        // Find existing salary structure or synthesize one from employee defaults
+        let struct = salaryStructures.find(
+          (s) => s.employeeId === emp.id || s.employeeNumber === emp.employeeNumber
+        );
+
+        if (!struct) {
+          const defaultGross = emp.designation?.toLowerCase().includes('senior') ? 48000 : 38000;
+          struct = {
+            id: `sal-auto-${emp.id}`,
+            employeeId: emp.id,
+            employeeNumber: emp.employeeNumber || 'UNASSIGNED',
+            employeeName: emp.fullName,
+            effectiveFrom: emp.dateOfJoining || '2024-04-01',
+            basicSalary: Math.round(defaultGross * 0.5),
+            hra: Math.round(defaultGross * 0.25),
+            specialAllowance: Math.round(defaultGross * 0.15),
+            conveyanceAllowance: 2500,
+            medicalAllowance: 1500,
+            otherEarnings: 0,
+            pfApplicable: true,
+            pfDeduction: 1800,
+            esiApplicable: false,
+            esiDeduction: 0,
+            tdsDeduction: 500,
+            professionalTax: 200,
+            otherDeductions: 0,
+            grossSalary: defaultGross,
+            netSalary: defaultGross - 2500,
+            bankName: emp.bankDetails?.bankName || 'ICICI Bank',
+            bankAccountNumber: emp.bankDetails?.bankAccountNumber || '000201594102',
+            bankIfsc: emp.bankDetails?.bankIfsc || 'ICIC0000002',
+            accountHolderName: emp.bankDetails?.accountHolderName || emp.fullName,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+        }
+
         // Collect approved travel expense claims for this employee
         const empApprovedExpenses = expenses.filter(
           (exp) =>
-            (exp.employeeId === struct.employeeId || exp.employeeNumber === struct.employeeNumber) &&
+            (exp.employeeId === emp.id || exp.employeeNumber === emp.employeeNumber) &&
             exp.status === 'APPROVED' &&
             exp.paymentStatus !== 'PAID'
         );
 
-        // Include reimbursement if enabled or approved claims exist
-        const reimbursementAmount = empApprovedExpenses.reduce(
-          (sum, exp) => sum + (exp.totalAmount || 0),
-          0
-        );
-
         const entry = calculateEmployeePayroll({
-          employeeId: struct.employeeId,
+          employee: emp,
           month: calcMonth,
           year: calcYear,
           salaryStructure: struct,
           attendanceRecords,
+          approvedExpenses: empApprovedExpenses,
           bonus: 0,
-          reimbursement: reimbursementAmount,
           advanceRecovery: 0,
           settings: systemSettings,
         });
@@ -221,10 +253,11 @@ export const PayrollRuns: React.FC = () => {
       }
 
       const newRun = await createPayrollRun(calcMonth, calcYear, entries);
+      const totalReimbursements = entries.reduce((sum, e) => sum + (e.reimbursement || 0), 0);
       logAction(
         'PAYROLL_RECALCULATED',
         'PAYROLL',
-        `Recalculated attendance-linked payroll for ${newRun.periodLabel} (${entries.length} staff members, Reimbursements: ₹${summaryMetrics.totalReimbursements})`,
+        `Recalculated attendance-linked payroll for ${newRun.periodLabel} (${entries.length} staff members, Reimbursements: ₹${totalReimbursements})`,
         newRun.id
       );
     } catch (err) {
@@ -614,6 +647,7 @@ export const PayrollRuns: React.FC = () => {
                 <th className="py-3 px-2 font-semibold">Late Count</th>
                 <th className="py-3 px-2 font-semibold">Late Ded.</th>
                 <th className="py-3 px-3 font-semibold">Gross Earnings</th>
+                <th className="py-3 px-2 font-semibold">Travel Claims</th>
                 <th className="py-3 px-2 font-semibold">Statutory Ded.</th>
                 <th className="py-3 px-2 font-semibold">Other Ded.</th>
                 <th className="py-3 px-2 font-semibold">Total Ded.</th>
@@ -677,11 +711,15 @@ export const PayrollRuns: React.FC = () => {
                       </td>
                       <td className="py-3 px-3 font-mono font-semibold text-slate-900">
                         <div>{formatINR(entry.grossEarnings)}</div>
-                        {entry.reimbursement > 0 && (
-                          <div className="text-[10px] text-emerald-700 font-sans font-medium flex items-center gap-0.5">
+                      </td>
+                      <td className="py-3 px-2 font-mono">
+                        {entry.reimbursement > 0 ? (
+                          <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                             <Receipt className="w-2.5 h-2.5" />
-                            <span>+{formatINR(entry.reimbursement)} claims</span>
-                          </div>
+                            <span>+{formatINR(entry.reimbursement)}</span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">₹0</span>
                         )}
                       </td>
                       <td className="py-3 px-2 font-mono text-slate-600">
@@ -961,12 +999,31 @@ export const PayrollRuns: React.FC = () => {
                     </div>
                   )}
                   {selectedEntryForAudit.reimbursement > 0 && (
-                    <div className="flex justify-between text-emerald-700 font-semibold bg-emerald-50/70 p-1 rounded">
-                      <span className="flex items-center gap-1 font-sans">
-                        <Receipt className="w-3 h-3" />
-                        <span>Approved Travel Claims:</span>
-                      </span>
-                      <span>+{formatINR(selectedEntryForAudit.reimbursement)}</span>
+                    <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                      <div className="flex justify-between text-emerald-700 font-semibold bg-emerald-50/70 p-1.5 rounded">
+                        <span className="flex items-center gap-1 font-sans">
+                          <Receipt className="w-3.5 h-3.5" />
+                          <span>Approved Travel Expense Claims Reimbursement:</span>
+                        </span>
+                        <span>+{formatINR(selectedEntryForAudit.reimbursement)}</span>
+                      </div>
+                      {/* Linked claims details */}
+                      <div className="bg-slate-50 p-2.5 rounded border border-slate-200 space-y-1">
+                        <span className="text-[10px] text-slate-500 uppercase font-sans font-bold block">
+                          Included Expense Claims ({selectedEntryForAudit.reimbursementClaimIds?.length || 0})
+                        </span>
+                        {expenses
+                          .filter((exp) => (selectedEntryForAudit.reimbursementClaimIds || []).includes(exp.id))
+                          .map((claim) => (
+                            <div key={claim.id} className="flex items-center justify-between text-[11px] text-slate-700 font-sans py-0.5 border-b border-slate-100 last:border-0">
+                              <div>
+                                <span className="font-mono font-bold text-slate-900">{claim.id}</span>
+                                <span className="text-slate-500"> · {claim.schoolName} ({claim.visitDate})</span>
+                              </div>
+                              <span className="font-mono font-semibold text-emerald-700">{formatINR(claim.totalAmount)}</span>
+                            </div>
+                          ))}
+                      </div>
                     </div>
                   )}
                 </div>

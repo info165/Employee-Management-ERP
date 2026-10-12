@@ -15,25 +15,68 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 
-/** Subscribe to every document in a collection. Calls back with the full list on every change. */
-export function watchCollection<T>(collectionName: string, onData: (items: T[]) => void): Unsubscribe {
+/** Subscribe to every document in a collection. Calls back with the full list on every change. If collection is empty, automatically populates with fallback seed data to persist in Firestore. */
+export function watchCollection<T extends { id: string }>(
+  collectionName: string,
+  onData: (items: T[]) => void,
+  seedData?: T[]
+): Unsubscribe {
+  let seeded = false;
   return onSnapshot(
     collection(db, collectionName),
-    (snap) => onData(snap.docs.map((d) => d.data() as T)),
-    (err) => console.warn(`[firestore] watch "${collectionName}" failed:`, err.message)
+    (snap) => {
+      if (snap.empty) {
+        if (!seeded && seedData && seedData.length > 0) {
+          seeded = true;
+          console.log(`[firestore] Collection "${collectionName}" is empty in Firestore. Bootstrapping with ${seedData.length} records...`);
+          seedData.forEach((item) => {
+            saveDoc(collectionName, item.id, item as DocumentData);
+          });
+          onData(seedData);
+        } else {
+          onData(seedData && seedData.length > 0 ? seedData : []);
+        }
+      } else {
+        onData(snap.docs.map((d) => d.data() as T));
+      }
+    },
+    (err) => {
+      console.warn(`[firestore] watch "${collectionName}" failed, falling back to local seed data:`, err.message);
+      if (seedData && seedData.length > 0) {
+        onData(seedData);
+      }
+    }
   );
 }
 
-/** Subscribe to a single document (used for singleton config docs like system_settings). */
-export function watchDoc<T>(
+/** Subscribe to a single document (used for singleton config docs like system_settings). If doc is missing, auto-bootstraps with default. */
+export function watchDoc<T extends Record<string, any>>(
   collectionName: string,
   docId: string,
-  onData: (item: T | null) => void
+  onData: (item: T | null) => void,
+  defaultDoc?: T
 ): Unsubscribe {
+  let seeded = false;
   return onSnapshot(
     doc(db, collectionName, docId),
-    (snap) => onData(snap.exists() ? (snap.data() as T) : null),
-    (err) => console.warn(`[firestore] watch "${collectionName}/${docId}" failed:`, err.message)
+    (snap) => {
+      if (snap.exists()) {
+        onData(snap.data() as T);
+      } else {
+        if (!seeded && defaultDoc) {
+          seeded = true;
+          console.log(`[firestore] Doc "${collectionName}/${docId}" missing. Bootstrapping defaults...`);
+          saveDoc(collectionName, docId, defaultDoc);
+          onData(defaultDoc);
+        } else {
+          onData(defaultDoc || null);
+        }
+      }
+    },
+    (err) => {
+      console.warn(`[firestore] watch "${collectionName}/${docId}" failed, falling back to default:`, err.message);
+      if (defaultDoc) onData(defaultDoc);
+    }
   );
 }
 

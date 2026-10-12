@@ -3,6 +3,7 @@ import {
   UserProfile,
   UserRole,
   Employee,
+  EmployeeBankDetails,
   EmployeeDocument,
   AttendanceRecord,
   SalaryStructure,
@@ -90,6 +91,8 @@ interface AuthContextType {
   // Mutators
   addEmployee: (emp: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'accountActivated'>) => Promise<Employee>;
   updateEmployee: (id: string, updates: Partial<Employee>) => Promise<void>;
+  updateEmployeeBankDetails: (employeeId: string, bankDetails: Partial<EmployeeBankDetails>, reason?: string) => Promise<void>;
+  verifyEmployeeBankDetails: (employeeId: string, status: 'VERIFIED' | 'REJECTED', notes?: string) => Promise<void>;
   approveOnboarding: (id: string, customNumber?: string) => Promise<{ employeeNumber: string }>;
   uploadDocument: (doc: Omit<EmployeeDocument, 'id' | 'uploadedAt'>) => Promise<void>;
   updateDocumentStatus: (docId: string, status: 'VERIFIED' | 'REJECTED', remarks?: string) => Promise<void>;
@@ -228,34 +231,38 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!firebaseUser) return;
 
     const unsubscribers = [
-      watchCollection<Employee>(COL.employees, setEmployees),
-      watchCollection<EmployeeDocument>(COL.documents, setDocuments),
-      watchCollection<AttendanceRecord>(COL.attendance, setAttendanceRecords),
-      watchCollection<EmployeeRequest>(COL.requests, setRequests),
-      watchCollection<SalaryStructure>(COL.salaryStructures, setSalaryStructures),
-      watchCollection<PayrollRun>(COL.payrollRuns, setPayrollRuns),
-      watchCollection<PayrollEntry>(COL.payrollEntries, setPayrollEntries),
-      watchCollection<School>(COL.schools, setSchools),
-      watchCollection<ExpenseClaim>(COL.expenses, setExpenses),
-      watchCollection<AuditLog>(COL.auditLogs, (items) =>
-        setAuditLogs([...items].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)))
+      watchCollection<Employee>(COL.employees, setEmployees, INITIAL_EMPLOYEES),
+      watchCollection<EmployeeDocument>(COL.documents, setDocuments, INITIAL_DOCUMENTS),
+      watchCollection<AttendanceRecord>(COL.attendance, setAttendanceRecords, INITIAL_ATTENDANCE),
+      watchCollection<EmployeeRequest>(COL.requests, setRequests, INITIAL_REQUESTS),
+      watchCollection<SalaryStructure>(COL.salaryStructures, setSalaryStructures, INITIAL_SALARY_STRUCTURES),
+      watchCollection<PayrollRun>(COL.payrollRuns, setPayrollRuns, INITIAL_PAYROLL_RUNS),
+      watchCollection<PayrollEntry>(COL.payrollEntries, setPayrollEntries, INITIAL_PAYROLL_ENTRIES),
+      watchCollection<School>(COL.schools, setSchools, INITIAL_SCHOOLS),
+      watchCollection<ExpenseClaim>(COL.expenses, setExpenses, INITIAL_EXPENSES),
+      watchCollection<AuditLog>(
+        COL.auditLogs,
+        (items) => setAuditLogs([...items].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1))),
+        INITIAL_AUDIT_LOGS
       ),
-      // These three are singleton config docs that only ever receive partial
-      // merge writes (e.g. updating just employeeNumberSequence). They never
-      // get a single "create with everything" write the way an employee or
-      // document record does, so a fresh Firestore doc can be missing fields
-      // a settings screen never happened to touch yet. Merging onto the
-      // built-in defaults here guarantees every field always has a sane
-      // value, instead of silently becoming `undefined` in the UI.
-      watchDoc<SystemSettings>(SETTINGS_COL, SETTINGS_DOC_ID, (data) => {
-        setSystemSettings({ ...INITIAL_SYSTEM_SETTINGS, ...data });
-      }),
-      watchDoc<IciciBankExportConfig>(BANK_CONFIG_COL, ICICI_DOC_ID, (data) => {
-        setIciciConfig({ ...INITIAL_ICICI_CONFIG, ...data });
-      }),
-      watchDoc<IciciTxtBatchConfig>(BANK_CONFIG_COL, ICICI_TXT_DOC_ID, (data) => {
-        setIciciTxtConfig({ ...INITIAL_ICICI_TXT_CONFIG, ...data });
-      }),
+      watchDoc<SystemSettings>(
+        SETTINGS_COL,
+        SETTINGS_DOC_ID,
+        (data) => setSystemSettings({ ...INITIAL_SYSTEM_SETTINGS, ...data }),
+        INITIAL_SYSTEM_SETTINGS
+      ),
+      watchDoc<IciciBankExportConfig>(
+        BANK_CONFIG_COL,
+        ICICI_DOC_ID,
+        (data) => setIciciConfig({ ...INITIAL_ICICI_CONFIG, ...data }),
+        INITIAL_ICICI_CONFIG
+      ),
+      watchDoc<IciciTxtBatchConfig>(
+        BANK_CONFIG_COL,
+        ICICI_TXT_DOC_ID,
+        (data) => setIciciTxtConfig({ ...INITIAL_ICICI_TXT_CONFIG, ...data }),
+        INITIAL_ICICI_TXT_CONFIG
+      ),
     ];
 
     return () => {
@@ -393,6 +400,89 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setEmployees((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
     if (firebaseUser) saveDoc(COL.employees, id, patch);
     logAction('EMPLOYEE_UPDATED', 'EMPLOYEE', `Employee record ${id} modified`, id);
+  };
+
+  const updateEmployeeBankDetails = async (
+    employeeId: string,
+    bankDetails: Partial<EmployeeBankDetails>,
+    reason?: string
+  ): Promise<void> => {
+    if (!isSuperAdmin) throw new Error('Unauthorized: Bank profile modifications require Super Admin access');
+    const emp = employees.find((e) => e.id === employeeId);
+    if (!emp) throw new Error('Employee not found');
+
+    const oldBank = emp.bankDetails;
+    const historyEntry = {
+      timestamp: new Date().toISOString(),
+      changedBy: currentUser?.email || 'info@funscholar.com',
+      field: 'bankDetails',
+      oldValue: oldBank ? `${oldBank.bankName} - ${oldBank.bankAccountNumber} (${oldBank.bankIfsc})` : 'None',
+      newValue: `${bankDetails.bankName || oldBank?.bankName || ''} - ${bankDetails.bankAccountNumber || oldBank?.bankAccountNumber || ''} (${bankDetails.bankIfsc || oldBank?.bankIfsc || ''})`,
+      reason: reason || 'Administrative correction',
+    };
+
+    const updatedBank: EmployeeBankDetails = {
+      accountHolderName: bankDetails.accountHolderName || oldBank?.accountHolderName || emp.fullName,
+      bankName: bankDetails.bankName || oldBank?.bankName || 'ICICI Bank',
+      bankAccountNumber: String(bankDetails.bankAccountNumber || oldBank?.bankAccountNumber || ''),
+      bankIfsc: (bankDetails.bankIfsc || oldBank?.bankIfsc || '').toUpperCase().trim(),
+      transactionRoute: bankDetails.transactionRoute || oldBank?.transactionRoute || (bankDetails.bankIfsc?.startsWith('ICIC') ? 'WIB' : 'NEFT'),
+      verificationStatus: bankDetails.verificationStatus || oldBank?.verificationStatus || 'VERIFIED',
+      verifiedAt: bankDetails.verificationStatus === 'VERIFIED' ? new Date().toISOString() : oldBank?.verifiedAt,
+      verifiedBy: bankDetails.verificationStatus === 'VERIFIED' ? (currentUser?.email || 'info@funscholar.com') : oldBank?.verifiedBy,
+      effectiveDate: bankDetails.effectiveDate || oldBank?.effectiveDate || new Date().toISOString().split('T')[0],
+      changeHistory: [...(oldBank?.changeHistory || []), historyEntry],
+    };
+
+    const patch = { bankDetails: updatedBank, updatedAt: new Date().toISOString() };
+    setEmployees((prev) => prev.map((e) => (e.id === employeeId ? { ...e, ...patch } : e)));
+    if (firebaseUser) saveDoc(COL.employees, employeeId, patch);
+
+    logAction(
+      'EMPLOYEE_BANK_UPDATED',
+      'EMPLOYEE',
+      `Updated bank profile for ${emp.fullName} (${updatedBank.bankName} A/C ${updatedBank.bankAccountNumber}, Route: ${updatedBank.transactionRoute}): ${reason || 'Admin update'}`,
+      employeeId
+    );
+  };
+
+  const verifyEmployeeBankDetails = async (
+    employeeId: string,
+    status: 'VERIFIED' | 'REJECTED',
+    notes?: string
+  ): Promise<void> => {
+    if (!isSuperAdmin) throw new Error('Unauthorized');
+    const emp = employees.find((e) => e.id === employeeId);
+    if (!emp || !emp.bankDetails) throw new Error('Employee or bank details not found');
+
+    const updatedBank: EmployeeBankDetails = {
+      ...emp.bankDetails,
+      verificationStatus: status,
+      verifiedAt: new Date().toISOString(),
+      verifiedBy: currentUser?.email || 'info@funscholar.com',
+      changeHistory: [
+        ...(emp.bankDetails.changeHistory || []),
+        {
+          timestamp: new Date().toISOString(),
+          changedBy: currentUser?.email || 'info@funscholar.com',
+          field: 'verificationStatus',
+          oldValue: emp.bankDetails.verificationStatus,
+          newValue: status,
+          reason: notes || `Marked ${status} by Super Admin`,
+        },
+      ],
+    };
+
+    const patch = { bankDetails: updatedBank, updatedAt: new Date().toISOString() };
+    setEmployees((prev) => prev.map((e) => (e.id === employeeId ? { ...e, ...patch } : e)));
+    if (firebaseUser) saveDoc(COL.employees, employeeId, patch);
+
+    logAction(
+      status === 'VERIFIED' ? 'BANK_VERIFIED' : 'BANK_REJECTED',
+      'EMPLOYEE',
+      `Bank details for ${emp.fullName} marked as ${status}${notes ? `: ${notes}` : ''}`,
+      employeeId
+    );
   };
 
   // Transactionally generate Employee ID in format EMP-YYYY-0001
@@ -692,6 +782,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const totalGross = entries.reduce((sum, e) => sum + e.grossEarnings, 0);
     const totalDeductions = entries.reduce((sum, e) => sum + e.totalDeductions, 0);
     const totalNetPayable = entries.reduce((sum, e) => sum + e.netPayable, 0);
+    const totalReimbursements = entries.reduce((sum, e) => sum + (e.reimbursement || 0), 0);
+    const totalUnpaidLeaveDeductions = entries.reduce((sum, e) => sum + (e.unpaidLeaveDeduction || 0), 0);
+    const totalLateDeductions = entries.reduce((sum, e) => sum + (e.lateArrivalDeduction || 0), 0);
+    const totalStatutoryDeductions = entries.reduce(
+      (sum, e) => sum + (e.pf || 0) + (e.esi || 0) + (e.tds || 0) + (e.professionalTax || 0),
+      0
+    );
+    const exceptionCount = entries.filter(
+      (e) => (e.exceptions && e.exceptions.length > 0) || e.bankVerificationStatus !== 'VERIFIED'
+    ).length;
 
     const newRun: PayrollRun = {
       id: runId,
@@ -703,6 +803,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       totalGross,
       totalDeductions,
       totalNetPayable,
+      totalReimbursements,
+      totalUnpaidLeaveDeductions,
+      totalLateDeductions,
+      totalStatutoryDeductions,
+      exceptionCount,
       calculatedAt: new Date().toISOString(),
       locked: false,
       createdAt: new Date().toISOString(),
@@ -943,6 +1048,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updateIciciTxtConfig,
         addEmployee,
         updateEmployee,
+        updateEmployeeBankDetails,
+        verifyEmployeeBankDetails,
         approveOnboarding,
         uploadDocument,
         updateDocumentStatus,

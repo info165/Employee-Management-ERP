@@ -49,6 +49,7 @@ export const ExpenseClaimsManager: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'>('ALL');
   const [paymentFilter, setPaymentFilter] = useState<'ALL' | 'UNPAID' | 'PENDING_PAYMENT' | 'PAID'>('ALL');
   const [schoolFilter, setSchoolFilter] = useState<string>('ALL');
+  const [employeeFilter, setEmployeeFilter] = useState<string>('ALL');
 
   // Modal states
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -59,8 +60,14 @@ export const ExpenseClaimsManager: React.FC = () => {
 
   // Filtered claims based on role
   const roleVisibleClaims = isEmployee
-    ? expenses.filter((c) => c.employeeId === currentEmployee?.id || c.employeeNumber === currentEmployee?.employeeNumber)
-    : expenses;
+    ? expenses.filter((c) =>
+        employeeFilter === 'ALL'
+          ? c.employeeId === currentEmployee?.id || c.employeeNumber === currentEmployee?.employeeNumber
+          : c.employeeId === employeeFilter || c.employeeNumber === employeeFilter
+      )
+    : employeeFilter === 'ALL'
+    ? expenses
+    : expenses.filter((c) => c.employeeId === employeeFilter || c.employeeNumber === employeeFilter);
 
   const filteredClaims = roleVisibleClaims.filter((c) => {
     const matchesSearch =
@@ -404,6 +411,20 @@ export const ExpenseClaimsManager: React.FC = () => {
             <option value="PENDING_PAYMENT">Pending Payment</option>
             <option value="PAID">Paid</option>
             <option value="UNPAID">Unpaid</option>
+          </select>
+
+          {/* Employee Filter */}
+          <select
+            value={employeeFilter}
+            onChange={(e) => setEmployeeFilter(e.target.value)}
+            className="px-2.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-hidden max-w-[190px]"
+          >
+            <option value="ALL">{isEmployee ? 'My Claims & Team Filter' : 'All Staff Members'}</option>
+            {employees.map((emp) => (
+              <option key={emp.id} value={emp.id}>
+                {emp.fullName} ({emp.employeeNumber || 'New'})
+              </option>
+            ))}
           </select>
 
           {/* School Master Filter */}

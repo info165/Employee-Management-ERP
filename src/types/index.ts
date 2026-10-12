@@ -89,6 +89,26 @@ export interface EmployeeDocument {
   verifiedBy?: string;
 }
 
+export interface EmployeeBankDetails {
+  accountHolderName: string;
+  bankName: string;
+  bankAccountNumber: string;
+  bankIfsc: string;
+  transactionRoute: 'WIB' | 'NEFT'; // WIB = ICICI within-bank, NEFT = other bank
+  verificationStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  verifiedAt?: string;
+  verifiedBy?: string;
+  effectiveDate: string;
+  changeHistory?: Array<{
+    timestamp: string;
+    changedBy: string;
+    field: string;
+    oldValue: string;
+    newValue: string;
+    reason?: string;
+  }>;
+}
+
 export interface Employee {
   id: string;
   employeeNumber?: string; // e.g. EMP-2026-0001
@@ -109,6 +129,7 @@ export interface Employee {
   designation: string;
   employmentType: EmploymentType;
   dateOfJoining: string;
+  dateOfLeaving?: string;
   workLocation: string;
   reportingManager: string;
   assignedWorkMode: WorkMode;
@@ -116,6 +137,9 @@ export interface Employee {
   weeklyOff: string[]; // e.g. ['Sunday']
   probationMonths?: number;
   employmentStatus: EmploymentStatus;
+  
+  // Banking profile
+  bankDetails?: EmployeeBankDetails;
   
   // Onboarding workflow
   onboardingStatus: OnboardingStatus;
@@ -246,12 +270,15 @@ export interface PayrollEntry {
   
   totalMonthDays: number;
   payableDays: number;
+  payableDaysDenominator: number; // e.g. 31 or scheduled 26
   presentDays: number;
   wfhDays: number;
   fieldDays: number;
   paidLeaveDays: number;
   unpaidLeaveDays: number;
   weeklyOffsAndHolidays: number;
+  lateArrivalCount: number;
+  lateArrivalMinutes: number;
   
   // Earnings
   basic: number;
@@ -260,7 +287,8 @@ export interface PayrollEntry {
   conveyance: number;
   medical: number;
   bonus: number;
-  reimbursement: number;
+  reimbursement: number; // Approved travel expense claims
+  reimbursementClaimIds?: string[];
   otherEarnings: number;
   grossEarnings: number;
   
@@ -282,6 +310,12 @@ export interface PayrollEntry {
   bankAccountNumber: string;
   bankIfsc: string;
   accountHolderName: string;
+  transactionRoute: 'WIB' | 'NEFT';
+  bankVerificationStatus?: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  
+  exceptions: string[]; // e.g. 'Invalid IFSC', 'Zero payable days'
+  calculationFormula?: string;
+  calculationTimestamp?: string;
   
   payslipReleased: boolean;
   releasedAt?: string;
@@ -299,10 +333,16 @@ export interface PayrollRun {
   totalGross: number;
   totalDeductions: number;
   totalNetPayable: number;
+  totalReimbursements: number;
+  totalUnpaidLeaveDeductions: number;
+  totalLateDeductions: number;
+  totalStatutoryDeductions: number;
+  exceptionCount: number;
   calculatedAt?: string;
   approvedAt?: string;
   approvedBy?: string;
   locked: boolean;
+  snapshotEntries?: PayrollEntry[];
   createdAt: string;
   updatedAt: string;
 }
@@ -328,6 +368,31 @@ export interface IciciBankExportConfig {
   }>;
 }
 
+export type SalaryProrationMethod = 'CALENDAR_DAYS' | 'SCHEDULED_WORKING_DAYS';
+
+export type LateDeductionRuleType =
+  | 'NONE'
+  | 'OCCURRENCES'
+  | 'PER_MINUTE'
+  | 'HALF_DAY_PENALTY'
+  | 'OCCURRENCE_TIER'
+  | 'PER_HOUR';
+
+export interface LateDeductionPolicy {
+  enabled: boolean; // MUST be false by default until Super Admin explicitly enables
+  officialStartTime?: string; // '09:30'
+  gracePeriodMinutes?: number; // 15
+  ruleType: LateDeductionRuleType;
+  thresholdMinutesOrCount?: number; // e.g. 30 minutes or 3 occurrences
+  ratePerUnit?: number; // per occurrence penalty or per minute rate
+  graceLateCountAllowed?: number;
+  deductionAmountPerOccurrence?: number;
+  deductionRatePerMinute?: number;
+  approvedPermissionExcludesLate: boolean;
+  effectiveDate?: string;
+  approvedBy?: string;
+}
+
 export interface SystemSettings {
   companyName: string;
   companyLogoUrl?: string;
@@ -348,11 +413,25 @@ export interface SystemSettings {
   officeGeofenceRadiusMeters: number; // 200
   officeAddress: string;
   
-  // Salary policies
+  // Salary and attendance-to-payroll rules engine
+  salaryProrationMethod: SalaryProrationMethod; // Calendar days (30/31) or Scheduled working days
+  unpaidLeaveBase: 'TOTAL_MONTH_DAYS' | 'SCHEDULED_WORKING_DAYS';
   unpaidLeaveDeductionEnabled: boolean; // default: true
+  
+  // Late deduction rules
   lateArrivalDeductionEnabled: boolean; // MUST be false by default
   lateDeductionThresholdMinutes: number;
-  includeApprovedReimbursementsInPayroll?: boolean; // default: false
+  lateDeductionPolicy?: LateDeductionPolicy;
+  
+  // Travel expenses reimbursement integration
+  includeApprovedReimbursementsInPayroll: boolean; // default: true
+  
+  // Company bank configuration defaults
+  corporateId?: string;
+  debitAccountNumber?: string;
+  externalReference?: string;
+  defaultBatchRemarks?: string;
+  confirmedDateFormat?: 'MM/DD/YYYY' | 'DD/MM/YYYY';
   
   holidays: Array<{ date: string; name: string }>;
   weeklyOffDays: string[]; // ['Sunday']
@@ -383,6 +462,7 @@ export interface TransportLeg {
   id: string;
   mode: TransportMode;
   amount: number;
+  distanceKm?: number;
   receiptName?: string;
   receiptUrl?: string;
   notes?: string;
@@ -427,7 +507,9 @@ export interface ExpenseClaim {
 
 export interface IciciTxtBatchConfig {
   corporateId: string; // e.g. FUNSCHOL03072019
+  clientCode?: string; // e.g. FUNSCHOLAR
   debitAccountNumber: string; // 12-digit, e.g. 627505030081
+  productCode?: string; // e.g. SALPAY
   externalReference: string; // e.g. Cut-off
   transactionDate: string; // YYYY-MM-DD
   batchRemarks: string; // Max 30 chars, e.g. Salary Payment for September

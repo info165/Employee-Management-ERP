@@ -13,9 +13,11 @@ import {
   Eye,
   ShieldAlert,
   ChevronRight,
+  Landmark,
 } from 'lucide-react';
 import { ApprovalModal } from './ApprovalModal';
 import { DocumentViewerModal } from './DocumentViewerModal';
+import { BankProfileModal } from './BankProfileModal';
 
 interface Props {
   onOpenNewOnboarding: () => void;
@@ -31,6 +33,7 @@ export const EmployeeDirectory: React.FC<Props> = ({ onOpenNewOnboarding }) => {
 
   const [selectedForApproval, setSelectedForApproval] = useState<Employee | null>(null);
   const [selectedForDocs, setSelectedForDocs] = useState<Employee | null>(null);
+  const [selectedForBank, setSelectedForBank] = useState<Employee | null>(null);
 
   // Departments list
   const departments = Array.from(new Set(employees.map((e) => e.department)));
@@ -148,6 +151,7 @@ export const EmployeeDirectory: React.FC<Props> = ({ onOpenNewOnboarding }) => {
                 <th className="py-3 px-4 font-semibold">Department & Role</th>
                 <th className="py-3 px-4 font-semibold">Work Mode</th>
                 <th className="py-3 px-4 font-semibold">Joining Date</th>
+                <th className="py-3 px-4 font-semibold">Banking Profile</th>
                 <th className="py-3 px-4 font-semibold">Onboarding Status</th>
                 <th className="py-3 px-4 font-semibold text-right">Actions</th>
               </tr>
@@ -155,7 +159,7 @@ export const EmployeeDirectory: React.FC<Props> = ({ onOpenNewOnboarding }) => {
             <tbody className="divide-y divide-slate-100">
               {filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-400">
+                  <td colSpan={8} className="py-8 text-center text-slate-400">
                     No employee records match the selected filters.
                   </td>
                 </tr>
@@ -199,6 +203,34 @@ export const EmployeeDirectory: React.FC<Props> = ({ onOpenNewOnboarding }) => {
                       {formatDateIndian(emp.dateOfJoining)}
                     </td>
                     <td className="py-3 px-4">
+                      {emp.bankDetails ? (
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                            <span className={`px-1.5 py-0.2 rounded font-bold ${
+                              emp.bankDetails.transactionRoute === 'WIB'
+                                ? 'bg-amber-100 text-amber-900'
+                                : 'bg-blue-100 text-blue-900'
+                            }`}>
+                              {emp.bankDetails.transactionRoute}
+                            </span>
+                            <span className="font-sans font-medium text-slate-800 truncate max-w-[90px]">
+                              {emp.bankDetails.bankName}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                            <span>A/C ...{emp.bankDetails.bankAccountNumber.slice(-4)}</span>
+                            {emp.bankDetails.verificationStatus === 'VERIFIED' ? (
+                              <span className="text-emerald-600 font-bold">✓</span>
+                            ) : (
+                              <span className="text-amber-600 font-bold">⚠</span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 italic">Not set</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
                       <span
                         className={`text-[11px] font-medium px-2 py-0.5 rounded ${
                           emp.onboardingStatus === 'APPROVED'
@@ -215,6 +247,15 @@ export const EmployeeDirectory: React.FC<Props> = ({ onOpenNewOnboarding }) => {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => setSelectedForBank(emp)}
+                          className="px-2.5 py-1 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded transition-colors flex items-center gap-1"
+                          title="View and verify banking profile & ICICI routing"
+                        >
+                          <Landmark className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Bank</span>
+                        </button>
+
                         <button
                           onClick={() => setSelectedForDocs(emp)}
                           className="px-2.5 py-1 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded transition-colors flex items-center gap-1"
@@ -255,6 +296,14 @@ export const EmployeeDirectory: React.FC<Props> = ({ onOpenNewOnboarding }) => {
         <DocumentViewerModal
           employee={selectedForDocs}
           onClose={() => setSelectedForDocs(null)}
+        />
+      )}
+
+      {/* Bank Profile Modal */}
+      {selectedForBank && (
+        <BankProfileModal
+          employee={selectedForBank}
+          onClose={() => setSelectedForBank(null)}
         />
       )}
     </div>
