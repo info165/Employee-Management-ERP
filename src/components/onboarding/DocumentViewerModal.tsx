@@ -89,6 +89,19 @@ export const DocumentViewerModal: React.FC<Props> = ({ employee, onClose }) => {
                         </div>
                         <div className="text-[11px] text-slate-400 font-mono">
                           {doc.fileName} · {(doc.fileSize / 1024).toFixed(0)} KB · Uploaded {formatDateIndian(doc.uploadedAt)}
+                          {doc.fileUrl && (
+                            <>
+                              {' · '}
+                              <a
+                                href={doc.fileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline"
+                              >
+                                View file
+                              </a>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>

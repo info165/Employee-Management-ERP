@@ -23,8 +23,22 @@ import { SchoolsDirectory } from './components/schools/SchoolsDirectory';
 import { ShieldCheck, UserCheck, User } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { activeRole, isSuperAdmin, isDataOperator, isEmployee } = useAuth();
+  const { activeRole, isSuperAdmin, isDataOperator, isEmployee, authReady } = useAuth();
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
+
+  // Wait until Firebase has told us whether a saved sign-in exists before
+  // rendering anything. Otherwise the UI briefly shows local demo data and
+  // then swaps to real Firestore data a moment later, which looks broken.
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-slate-400">
+          <div className="w-8 h-8 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+          <span className="text-sm font-medium">Loading...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 selection:bg-slate-900 selection:text-white">

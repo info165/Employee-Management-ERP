@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { DocumentType } from '../../types';
 import { formatDateIndian } from '../../lib/exportUtils';
+import { uploadEmployeeDocumentFile } from '../../lib/storageUpload';
 import {
   FileCheck2,
   Upload,
@@ -21,30 +22,37 @@ export const MyDocuments: React.FC = () => {
   const [docType, setDocType] = useState<DocumentType>('EDUCATION');
   const [title, setTitle] = useState('');
   const [maskedId, setMaskedId] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentEmployee) return;
+    if (!currentEmployee || !file) return;
 
     setSubmitting(true);
+    setUploadError(null);
     try {
+      const meta = await uploadEmployeeDocumentFile(currentEmployee.id, docType, file);
       await uploadDocument({
         employeeId: currentEmployee.id,
         userId: currentEmployee.userId,
         docType,
         title: title || `${docType.replace('_', ' ')} Document`,
-        fileName: `${docType.toLowerCase()}_upload.pdf`,
-        fileSize: 420000,
-        mimeType: 'application/pdf',
+        fileName: meta.fileName,
+        fileSize: meta.fileSize,
+        mimeType: meta.mimeType,
+        fileUrl: meta.fileUrl,
         maskedIdentifier: maskedId || undefined,
         verificationStatus: 'PENDING',
       });
       setShowUploadModal(false);
       setTitle('');
       setMaskedId('');
+      setFile(null);
     } catch (err) {
       console.error(err);
+      setUploadError('Upload failed. Check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -99,6 +107,19 @@ export const MyDocuments: React.FC = () => {
                   <h3 className="font-semibold text-slate-900 text-sm">{doc.title}</h3>
                   <p className="text-[11px] text-slate-400 font-mono">
                     {doc.fileName} · {(doc.fileSize / 1024).toFixed(0)} KB
+                    {doc.fileUrl && (
+                      <>
+                        {' · '}
+                        <a
+                          href={doc.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
+                          View
+                        </a>
+                      </>
+                    )}
                   </p>
                 </div>
               </div>
@@ -195,25 +216,41 @@ export const MyDocuments: React.FC = () => {
                 />
               </div>
 
-              <div className="border border-dashed border-slate-200 rounded-lg p-4 text-center bg-slate-50">
+              <label className="block border border-dashed border-slate-200 rounded-lg p-4 text-center bg-slate-50 cursor-pointer hover:border-slate-300">
                 <Upload className="w-6 h-6 text-slate-400 mx-auto mb-1" />
                 <span className="text-[11px] text-slate-600 font-medium block">
-                  Select File (PDF, PNG, JPG up to 10MB)
+                  {file ? file.name : 'Select File (PDF, PNG, JPG up to 10MB)'}
                 </span>
-              </div>
+                <input
+                  type="file"
+                  accept="application/pdf,image/*"
+                  className="hidden"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                />
+              </label>
+
+              {uploadError && (
+                <div className="p-2 bg-rose-50 border border-rose-100 rounded-lg text-[11px] text-rose-700">
+                  {uploadError}
+                </div>
+              )}
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowUploadModal(false)}
+                  onClick={() => {
+                    setShowUploadModal(false);
+                    setFile(null);
+                    setUploadError(null);
+                  }}
                   className="px-3.5 py-1.5 text-slate-600 hover:text-slate-800 bg-slate-100 rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="px-4 py-1.5 font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-xs"
+                  disabled={submitting || !file}
+                  className="px-4 py-1.5 font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? 'Uploading...' : 'Submit to HR Desk'}
                 </button>

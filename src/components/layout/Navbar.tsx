@@ -1,15 +1,18 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { UserRole } from '../../types';
-import { ShieldCheck, UserCheck, User, LogOut, Building2, ChevronDown, Check } from 'lucide-react';
+import { ShieldCheck, UserCheck, User, LogOut, Building2, ChevronDown, Check, Cloud, CloudOff } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const {
     currentUser,
+    firebaseUser,
+    isDbConnected,
     activeRole,
     switchRole,
     currentEmployee,
     employees,
+    signInWithGoogle,
     signOut,
   } = useAuth();
 
@@ -49,6 +52,26 @@ export const Navbar: React.FC = () => {
 
         {/* Right: Role Switcher & User Profile */}
         <div className="flex items-center gap-3">
+          {/* Firestore connection status / sign-in */}
+          {isDbConnected ? (
+            <div
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-emerald-50 border border-emerald-200 rounded-md text-emerald-700"
+              title={`Signed in as ${firebaseUser?.email}. Data is saved to Firestore.`}
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Live</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => signInWithGoogle()}
+              title="Sign in with Google to save data permanently to Firestore"
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-md text-slate-600 transition-colors"
+            >
+              <CloudOff className="w-3.5 h-3.5" />
+              <span>Local only · Sign in to save</span>
+            </button>
+          )}
+
           {/* Quick Role Switcher for Reviewers / Evaluators */}
           <div className="relative" ref={dropdownRef}>
             <button

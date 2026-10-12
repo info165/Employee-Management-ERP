@@ -1,0 +1,36 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'info@funscholar.com' ||
+        request.auth.uid == 'admin_master'
+      );
+    }
+
+    // Default deny everything not explicitly matched below.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Employee statutory & identity documents, uploaded by the app at
+    // employee_documents/{employeeId}/{docType}/{fileName}.
+    // The bootstrapped Super Admin can read and write every file (today's
+    // realistic usage: only the admin account signs in and manages HR data).
+    // Any other signed-in user may read or write only a file they themselves
+    // uploaded, identified by the uploadedBy custom metadata set at upload time.
+    match /employee_documents/{employeeId}/{docType}/{fileName} {
+      allow read: if isBootstrappedAdmin() ||
+        (isSignedIn() && resource.metadata.uploadedBy == request.auth.uid);
+      allow write: if isSignedIn() &&
+        request.resource.size < 10 * 1024 * 1024 &&
+        request.resource.contentType.matches('application/pdf|image/.*') &&
+        (isBootstrappedAdmin() || request.resource.metadata.uploadedBy == request.auth.uid);
+    }
+  }
+}

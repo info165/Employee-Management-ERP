@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { EmploymentType, WorkMode, DocumentType } from '../../types';
+import { uploadEmployeeDocumentFile } from '../../lib/storageUpload';
 import {
   User,
   Briefcase,
@@ -9,7 +10,7 @@ import {
   ArrowRight,
   ArrowLeft,
   Shield,
-  Upload,
+  Paperclip,
 } from 'lucide-react';
 
 interface Props {
@@ -45,20 +46,22 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
   const [assignedWorkMode, setAssignedWorkMode] = useState<WorkMode>('FIELD');
   const [standardWorkingHours, setStandardWorkingHours] = useState(8);
 
-  // Step 3: Statutory Uploads
+  // Step 3: Statutory Uploads — real files, selected via file pickers below.
+  // Only a document that is actually attached gets uploaded and recorded;
+  // nothing is auto-generated, so the audit trail only logs real uploads.
   const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [panNumber, setPanNumber] = useState('');
   const [bankAccNumber, setBankAccNumber] = useState('');
   const [bankIfsc, setBankIfsc] = useState('');
-  const [uploadedDocsList, setUploadedDocsList] = useState<{ type: DocumentType; name: string }[]>([
-    { type: 'AADHAAR', name: 'aadhaar_card_scanned.pdf' },
-    { type: 'PAN', name: 'pan_card_scanned.pdf' },
-    { type: 'CANCELLED_CHEQUE', name: 'cancelled_cheque.pdf' },
-  ]);
+  const [aadhaarFile, setAadhaarFile] = useState<File | null>(null);
+  const [panFile, setPanFile] = useState<File | null>(null);
+  const [chequeFile, setChequeFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
+    setUploadError(null);
     try {
       const newEmp = await addEmployee({
         fullName,
@@ -84,42 +87,41 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
         onboardingStatus: 'UNDER_REVIEW', // Ready for Super Admin review & approval
       });
 
-      // Upload statutory docs
-      const maskedAadhaar = aadhaarNumber ? `XXXX-XXXX-${aadhaarNumber.slice(-4)}` : 'XXXX-XXXX-4912';
-      const maskedPan = panNumber ? `${panNumber.slice(0, 5)}****${panNumber.slice(-1)}` : 'ABCDE****G';
+      // Upload only the statutory documents that were actually attached.
+      // A document record (and its audit trail entry) is created only when
+      // a real file was selected and successfully uploaded.
+      const maskedAadhaar = aadhaarNumber ? `XXXX-XXXX-${aadhaarNumber.slice(-4)}` : undefined;
+      const maskedPan = panNumber ? `${panNumber.slice(0, 5)}****${panNumber.slice(-1)}` : undefined;
+      const maskedBank = bankAccNumber ? `A/C Ending ...${bankAccNumber.slice(-4)}` : undefined;
 
-      await uploadDocument({
-        employeeId: newEmp.id,
-        docType: 'AADHAAR',
-        title: 'Aadhaar Card Copy',
-        fileName: 'aadhaar_scan.pdf',
-        fileSize: 450000,
-        mimeType: 'application/pdf',
-        maskedIdentifier: maskedAadhaar,
-        verificationStatus: 'PENDING',
-      });
+      const uploads: { file: File | null; docType: DocumentType; title: string; maskedIdentifier?: string }[] = [
+        { file: aadhaarFile, docType: 'AADHAAR', title: 'Aadhaar Card Copy', maskedIdentifier: maskedAadhaar },
+        { file: panFile, docType: 'PAN', title: 'PAN Card Copy', maskedIdentifier: maskedPan },
+        { file: chequeFile, docType: 'CANCELLED_CHEQUE', title: 'Cancelled Cheque / Bank Passbook', maskedIdentifier: maskedBank },
+      ];
 
-      await uploadDocument({
-        employeeId: newEmp.id,
-        docType: 'PAN',
-        title: 'PAN Card Copy',
-        fileName: 'pan_scan.pdf',
-        fileSize: 310000,
-        mimeType: 'application/pdf',
-        maskedIdentifier: maskedPan,
-        verificationStatus: 'PENDING',
-      });
-
-      await uploadDocument({
-        employeeId: newEmp.id,
-        docType: 'CANCELLED_CHEQUE',
-        title: 'Cancelled Cheque / Bank Passbook',
-        fileName: 'bank_proof.pdf',
-        fileSize: 520000,
-        mimeType: 'application/pdf',
-        maskedIdentifier: bankAccNumber ? `A/C Ending ...${bankAccNumber.slice(-4)}` : 'A/C Ending ...8812',
-        verificationStatus: 'PENDING',
-      });
+      for (const u of uploads) {
+        if (!u.file) continue;
+        try {
+          const meta = await uploadEmployeeDocumentFile(newEmp.id, u.docType, u.file);
+          await uploadDocument({
+            employeeId: newEmp.id,
+            docType: u.docType,
+            title: u.title,
+            fileName: meta.fileName,
+            fileSize: meta.fileSize,
+            mimeType: meta.mimeType,
+            fileUrl: meta.fileUrl,
+            maskedIdentifier: u.maskedIdentifier,
+            verificationStatus: 'PENDING',
+          });
+        } catch (uploadErr) {
+          console.error(`Failed to upload ${u.title}:`, uploadErr);
+          setUploadError(
+            `${u.title} could not be uploaded, but the employee record was created. You can try attaching it again from the employee's document desk.`
+          );
+        }
+      }
 
       onSuccess();
     } catch (err) {
@@ -526,26 +528,48 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
                 </div>
               </div>
 
-              {/* Uploads checklist */}
+              {/* Uploads checklist — real files, each optional */}
               <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-2">
                 <div className="font-semibold text-slate-800 text-xs">
-                  Attached Documents Proof (Verified Mock Storage):
+                  Attach Supporting Documents (optional, uploaded to secure storage):
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div className="p-2 bg-white rounded border border-slate-200 flex items-center justify-between text-[11px]">
-                    <span>Aadhaar Proof</span>
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                  </div>
-                  <div className="p-2 bg-white rounded border border-slate-200 flex items-center justify-between text-[11px]">
-                    <span>PAN Proof</span>
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                  </div>
-                  <div className="p-2 bg-white rounded border border-slate-200 flex items-center justify-between text-[11px]">
-                    <span>Cancelled Cheque</span>
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                  </div>
+                  {[
+                    { label: 'Aadhaar Proof', file: aadhaarFile, set: setAadhaarFile },
+                    { label: 'PAN Proof', file: panFile, set: setPanFile },
+                    { label: 'Cancelled Cheque', file: chequeFile, set: setChequeFile },
+                  ].map((slot) => (
+                    <label
+                      key={slot.label}
+                      className="p-2 bg-white rounded border border-slate-200 flex items-center justify-between text-[11px] cursor-pointer hover:border-slate-300"
+                    >
+                      <span className="flex items-center gap-1.5 truncate">
+                        {slot.file ? (
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        ) : (
+                          <Paperclip className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        )}
+                        <span className="truncate">{slot.file ? slot.file.name : slot.label}</span>
+                      </span>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        className="hidden"
+                        onChange={(e) => slot.set(e.target.files?.[0] || null)}
+                      />
+                    </label>
+                  ))}
                 </div>
+                <p className="text-[10px] text-slate-400">
+                  Leave any of these blank to add it later from the employee's document desk.
+                </p>
               </div>
+
+              {uploadError && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800">
+                  {uploadError}
+                </div>
+              )}
 
               <div className="flex justify-between pt-3">
                 <button

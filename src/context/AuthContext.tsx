@@ -33,13 +33,34 @@ import {
   INITIAL_EXPENSES,
   INITIAL_ICICI_TXT_CONFIG,
 } from '../lib/seedData';
-import { auth, db, testConnection } from '../lib/firebase';
+import { auth, testConnection } from '../lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { watchCollection, watchDoc, saveDoc } from '../lib/firestoreSync';
+
+// Firestore collection / doc names, matching firestore.rules exactly.
+const COL = {
+  employees: 'employees',
+  documents: 'employee_documents',
+  attendance: 'attendance_records',
+  requests: 'requests',
+  salaryStructures: 'salary_structures',
+  payrollRuns: 'payroll_runs',
+  payrollEntries: 'payroll_entries',
+  schools: 'schools',
+  expenses: 'expenses',
+  auditLogs: 'audit_logs',
+} as const;
+const SETTINGS_COL = 'system_settings';
+const SETTINGS_DOC_ID = 'main';
+const BANK_CONFIG_COL = 'bank_export_configs';
+const ICICI_DOC_ID = 'icici';
+const ICICI_TXT_DOC_ID = 'icici_txt';
 
 interface AuthContextType {
   currentUser: UserProfile | null;
   firebaseUser: User | null;
+  isDbConnected: boolean;
+  authReady: boolean;
   activeRole: UserRole;
   isSuperAdmin: boolean;
   isDataOperator: boolean;
@@ -153,6 +174,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [activeRole, setActiveRole] = useState<UserRole>('SUPER_ADMIN');
   const [activeEmployeeId, setActiveEmployeeId] = useState<string>('emp-001');
 
+  // True once Firebase has told us whether a saved sign-in exists. Until then
+  // we don't know if we'll end up showing local demo data or real Firestore
+  // data, so the UI should wait rather than flash the demo numbers first.
+  const [authReady, setAuthReady] = useState(false);
+
   // Test Firestore on boot per Firebase guidelines
   useEffect(() => {
     testConnection();
@@ -161,11 +187,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Listen to Firebase Auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      console.log(`[auth] onAuthStateChanged fired: ${fbUser ? `signed in as ${fbUser.email}` : 'signed out / no user'}`);
       setFirebaseUser(fbUser);
       if (fbUser) {
+        // Force a token refresh so a session that's actually invalid (expired,
+        // revoked, blocked by a Workspace policy, etc.) fails loudly right
+        // here with a specific reason, instead of silently reverting later.
+        try {
+          await fbUser.getIdToken(true);
+          console.log('[auth] token refresh OK, session is genuinely valid');
+        } catch (tokenErr) {
+          console.error('[auth] token refresh FAILED — this is why the session is being dropped:', tokenErr);
+        }
+
         const isEmailAdmin = fbUser.email === BOOTSTRAP_ADMIN_EMAIL;
         const role: UserRole = isEmailAdmin ? 'SUPER_ADMIN' : 'EMPLOYEE';
-        
+
         const profile: UserProfile = {
           uid: fbUser.uid,
           email: fbUser.email || '',
@@ -177,11 +214,73 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setCurrentUser(profile);
         setActiveRole(role);
       }
+      setAuthReady(true);
     });
 
     return () => unsubscribe();
   }, []);
 
+  // Once signed in, mirror every collection from Firestore into local state in
+  // real time. Until then the app keeps using the local demo/seed data above,
+  // unchanged from before — signing in is what switches this app from a demo
+  // to a persisted, multi-device instance.
+  useEffect(() => {
+    if (!firebaseUser) return;
+
+    const unsubscribers = [
+      watchCollection<Employee>(COL.employees, setEmployees),
+      watchCollection<EmployeeDocument>(COL.documents, setDocuments),
+      watchCollection<AttendanceRecord>(COL.attendance, setAttendanceRecords),
+      watchCollection<EmployeeRequest>(COL.requests, setRequests),
+      watchCollection<SalaryStructure>(COL.salaryStructures, setSalaryStructures),
+      watchCollection<PayrollRun>(COL.payrollRuns, setPayrollRuns),
+      watchCollection<PayrollEntry>(COL.payrollEntries, setPayrollEntries),
+      watchCollection<School>(COL.schools, setSchools),
+      watchCollection<ExpenseClaim>(COL.expenses, setExpenses),
+      watchCollection<AuditLog>(COL.auditLogs, (items) =>
+        setAuditLogs([...items].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)))
+      ),
+      // These three are singleton config docs that only ever receive partial
+      // merge writes (e.g. updating just employeeNumberSequence). They never
+      // get a single "create with everything" write the way an employee or
+      // document record does, so a fresh Firestore doc can be missing fields
+      // a settings screen never happened to touch yet. Merging onto the
+      // built-in defaults here guarantees every field always has a sane
+      // value, instead of silently becoming `undefined` in the UI.
+      watchDoc<SystemSettings>(SETTINGS_COL, SETTINGS_DOC_ID, (data) => {
+        setSystemSettings({ ...INITIAL_SYSTEM_SETTINGS, ...data });
+      }),
+      watchDoc<IciciBankExportConfig>(BANK_CONFIG_COL, ICICI_DOC_ID, (data) => {
+        setIciciConfig({ ...INITIAL_ICICI_CONFIG, ...data });
+      }),
+      watchDoc<IciciTxtBatchConfig>(BANK_CONFIG_COL, ICICI_TXT_DOC_ID, (data) => {
+        setIciciTxtConfig({ ...INITIAL_ICICI_TXT_CONFIG, ...data });
+      }),
+    ];
+
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+      // Signing out stops saving anything, so leaving the last-synced real
+      // data frozen on screen would be misleading (it would look live and
+      // editable while actually going nowhere). Switch back to the local
+      // demo data instead, matching the "Local only" badge the UI now shows.
+      setEmployees(INITIAL_EMPLOYEES);
+      setDocuments(INITIAL_DOCUMENTS);
+      setAttendanceRecords(INITIAL_ATTENDANCE);
+      setRequests(INITIAL_REQUESTS);
+      setSalaryStructures(INITIAL_SALARY_STRUCTURES);
+      setPayrollRuns(INITIAL_PAYROLL_RUNS);
+      setPayrollEntries(INITIAL_PAYROLL_ENTRIES);
+      setIciciConfig(INITIAL_ICICI_CONFIG);
+      setSystemSettings(INITIAL_SYSTEM_SETTINGS);
+      setAuditLogs(INITIAL_AUDIT_LOGS);
+      setSchools(INITIAL_SCHOOLS);
+      setExpenses(INITIAL_EXPENSES);
+      setIciciTxtConfig(INITIAL_ICICI_TXT_CONFIG);
+    };
+  }, [firebaseUser]);
+
+  const isDbConnected = !!firebaseUser;
   const isSuperAdmin = activeRole === 'SUPER_ADMIN';
   const isDataOperator = activeRole === 'DATA_OPERATOR';
   const isEmployee = activeRole === 'EMPLOYEE';
@@ -208,6 +307,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       timestamp: new Date().toISOString(),
     };
     setAuditLogs((prev) => [newLog, ...prev]);
+    if (firebaseUser) saveDoc(COL.auditLogs, newLog.id, newLog);
   };
 
   const switchRole = (role: UserRole, targetEmployeeId?: string) => {
@@ -283,14 +383,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       updatedAt: new Date().toISOString(),
     };
     setEmployees((prev) => [newEmp, ...prev]);
+    if (firebaseUser) saveDoc(COL.employees, id, newEmp);
     logAction('EMPLOYEE_ONBOARD_SUBMITTED', 'EMPLOYEE', `New employee onboarding record created for ${newEmp.fullName}`, id);
     return newEmp;
   };
 
   const updateEmployee = async (id: string, updates: Partial<Employee>) => {
-    setEmployees((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, ...updates, updatedAt: new Date().toISOString() } : e))
-    );
+    const patch = { ...updates, updatedAt: new Date().toISOString() };
+    setEmployees((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    if (firebaseUser) saveDoc(COL.employees, id, patch);
     logAction('EMPLOYEE_UPDATED', 'EMPLOYEE', `Employee record ${id} modified`, id);
   };
 
@@ -305,24 +406,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...prev,
       employeeNumberSequence: nextSeq,
     }));
+    if (firebaseUser) saveDoc(SETTINGS_COL, SETTINGS_DOC_ID, { employeeNumberSequence: nextSeq });
 
-    setEmployees((prev) =>
-      prev.map((e) => {
-        if (e.id === id) {
-          return {
-            ...e,
-            employeeNumber: generatedNumber,
-            onboardingStatus: 'APPROVED',
-            employmentStatus: 'ACTIVE',
-            accountActivated: true,
-            approvedAt: new Date().toISOString(),
-            approvedBy: currentUser?.email || 'info@funscholar.com',
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        return e;
-      })
-    );
+    const approvalPatch = {
+      employeeNumber: generatedNumber,
+      onboardingStatus: 'APPROVED' as const,
+      employmentStatus: 'ACTIVE' as const,
+      accountActivated: true,
+      approvedAt: new Date().toISOString(),
+      approvedBy: currentUser?.email || 'info@funscholar.com',
+      updatedAt: new Date().toISOString(),
+    };
+    setEmployees((prev) => prev.map((e) => (e.id === id ? { ...e, ...approvalPatch } : e)));
+    if (firebaseUser) saveDoc(COL.employees, id, approvalPatch);
 
     logAction(
       'ONBOARDING_APPROVED',
@@ -341,6 +437,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       uploadedAt: new Date().toISOString(),
     };
     setDocuments((prev) => [newDoc, ...prev]);
+    if (firebaseUser) saveDoc(COL.documents, newDoc.id, newDoc);
     logAction('DOCUMENT_UPLOADED', 'DOCUMENT', `Uploaded ${docData.title} (${docData.docType})`, newDoc.id);
   };
 
@@ -349,19 +446,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     status: 'VERIFIED' | 'REJECTED',
     remarks?: string
   ) => {
-    setDocuments((prev) =>
-      prev.map((d) =>
-        d.id === docId
-          ? {
-              ...d,
-              verificationStatus: status,
-              verificationRemarks: remarks,
-              verifiedAt: new Date().toISOString(),
-              verifiedBy: currentUser?.email,
-            }
-          : d
-      )
-    );
+    const patch = {
+      verificationStatus: status,
+      verificationRemarks: remarks,
+      verifiedAt: new Date().toISOString(),
+      verifiedBy: currentUser?.email,
+    };
+    setDocuments((prev) => prev.map((d) => (d.id === docId ? { ...d, ...patch } : d)));
+    if (firebaseUser) saveDoc(COL.documents, docId, patch);
     logAction('DOCUMENT_VERIFIED', 'DOCUMENT', `Document ${docId} status set to ${status}${remarks ? `: ${remarks}` : ''}`, docId);
   };
 
@@ -413,6 +505,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     setAttendanceRecords((prev) => [newRecord, ...prev]);
+    if (firebaseUser) saveDoc(COL.attendance, newRecord.id, newRecord);
     logAction(
       'ATTENDANCE_CHECK_IN',
       'ATTENDANCE',
@@ -462,6 +555,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
 
     if (updatedRecord) {
+      if (firebaseUser) saveDoc(COL.attendance, (updatedRecord as AttendanceRecord).id, updatedRecord as AttendanceRecord);
       logAction(
         'ATTENDANCE_CHECK_OUT',
         'ATTENDANCE',
@@ -497,20 +591,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       timestamp: new Date().toISOString(),
     };
 
+    const correctionPatch = {
+      [field]: newValue,
+      isCorrected: true,
+      correctionAudit: [auditItem, ...(rec.correctionAudit || [])],
+      updatedAt: new Date().toISOString(),
+    };
     setAttendanceRecords((prev) =>
-      prev.map((r) => {
-        if (r.id === recordId) {
-          return {
-            ...r,
-            [field]: newValue,
-            isCorrected: true,
-            correctionAudit: [auditItem, ...(r.correctionAudit || [])],
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        return r;
-      })
+      prev.map((r) => (r.id === recordId ? { ...r, ...correctionPatch } : r))
     );
+    if (firebaseUser) saveDoc(COL.attendance, recordId, correctionPatch);
 
     logAction(
       'ATTENDANCE_CORRECTED',
@@ -536,6 +626,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       updatedAt: new Date().toISOString(),
     };
     setRequests((prev) => [newReq, ...prev]);
+    if (firebaseUser) saveDoc(COL.requests, newReq.id, newReq);
     logAction('REQUEST_SUBMITTED', 'REQUEST', `Submitted ${reqData.type} request by ${currentEmployee.fullName}`, newReq.id);
   };
 
@@ -544,21 +635,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     status: 'APPROVED' | 'REJECTED',
     comment?: string
   ) => {
-    setRequests((prev) =>
-      prev.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status,
-              approverId: currentUser?.email,
-              approverName: currentUser?.displayName,
-              approverComment: comment,
-              reviewedAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            }
-          : r
-      )
-    );
+    const patch = {
+      status,
+      approverId: currentUser?.email,
+      approverName: currentUser?.displayName,
+      approverComment: comment,
+      reviewedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setRequests((prev) => prev.map((r) => (r.id === requestId ? { ...r, ...patch } : r)));
+    if (firebaseUser) saveDoc(COL.requests, requestId, patch);
     logAction('REQUEST_REVIEWED', 'REQUEST', `Request ${requestId} ${status}${comment ? `: ${comment}` : ''}`, requestId);
   };
 
@@ -571,13 +657,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nowIso = new Date().toISOString();
 
     if (existingIdx >= 0) {
+      const patch = { ...structure, updatedAt: nowIso };
       setSalaryStructures((prev) =>
-        prev.map((s, idx) =>
-          idx === existingIdx
-            ? { ...s, ...structure, updatedAt: nowIso }
-            : s
-        )
+        prev.map((s, idx) => (idx === existingIdx ? { ...s, ...patch } : s))
       );
+      // Firestore doc id is the employeeId itself, per firestore.rules (salary_structures/{employeeId}).
+      if (firebaseUser) saveDoc(COL.salaryStructures, structure.employeeId, patch);
     } else {
       const newStruct: SalaryStructure = {
         ...structure,
@@ -586,6 +671,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updatedAt: nowIso,
       };
       setSalaryStructures((prev) => [newStruct, ...prev]);
+      if (firebaseUser) saveDoc(COL.salaryStructures, structure.employeeId, newStruct);
     }
     logAction('SALARY_STRUCTURE_SAVED', 'SALARY', `Saved salary structure for employee ${structure.employeeName}`, structure.employeeId);
   };
@@ -625,6 +711,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setPayrollRuns((prev) => [newRun, ...prev.filter((r) => r.id !== runId)]);
     setPayrollEntries((prev) => [...entries, ...prev.filter((e) => e.payrollRunId !== runId)]);
+    if (firebaseUser) {
+      saveDoc(COL.payrollRuns, runId, newRun);
+      entries.forEach((entry) => saveDoc(COL.payrollEntries, entry.id, entry));
+    }
 
     logAction('PAYROLL_CALCULATED', 'PAYROLL', `Calculated payroll for ${periodLabel} (${entries.length} employees, Net: ₹${totalNetPayable})`, runId);
     return newRun;
@@ -633,51 +723,45 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const updatePayrollStatus = async (runId: string, status: PayrollRun['status']) => {
     if (!isSuperAdmin) throw new Error('Unauthorized');
     const isLocking = status === 'APPROVED' || status === 'EXPORTED' || status === 'PAID';
-    setPayrollRuns((prev) =>
-      prev.map((r) =>
-        r.id === runId
-          ? {
-              ...r,
-              status,
-              locked: isLocking,
-              approvedAt: status === 'APPROVED' ? new Date().toISOString() : r.approvedAt,
-              approvedBy: status === 'APPROVED' ? currentUser?.email : r.approvedBy,
-              updatedAt: new Date().toISOString(),
-            }
-          : r
-      )
-    );
+    const existingRun = payrollRuns.find((r) => r.id === runId);
+    const patch = {
+      status,
+      locked: isLocking,
+      approvedAt: status === 'APPROVED' ? new Date().toISOString() : existingRun?.approvedAt,
+      approvedBy: status === 'APPROVED' ? currentUser?.email : existingRun?.approvedBy,
+      updatedAt: new Date().toISOString(),
+    };
+    setPayrollRuns((prev) => prev.map((r) => (r.id === runId ? { ...r, ...patch } : r)));
+    if (firebaseUser) saveDoc(COL.payrollRuns, runId, patch);
     logAction('PAYROLL_STATUS_CHANGED', 'PAYROLL', `Payroll run ${runId} status changed to ${status}`, runId);
   };
 
   const releasePayslips = async (runId: string) => {
     if (!isSuperAdmin) throw new Error('Unauthorized');
+    const releasedAt = new Date().toISOString();
+    const affectedIds = payrollEntries.filter((e) => e.payrollRunId === runId).map((e) => e.id);
     setPayrollEntries((prev) =>
-      prev.map((e) =>
-        e.payrollRunId === runId
-          ? { ...e, payslipReleased: true, releasedAt: new Date().toISOString() }
-          : e
-      )
+      prev.map((e) => (e.payrollRunId === runId ? { ...e, payslipReleased: true, releasedAt } : e))
     );
+    if (firebaseUser) {
+      affectedIds.forEach((entryId) => saveDoc(COL.payrollEntries, entryId, { payslipReleased: true, releasedAt }));
+    }
     logAction('PAYSLIPS_RELEASED', 'PAYROLL', `Released employee payslips for payroll run ${runId}`, runId);
   };
 
   const saveIciciConfig = async (cfg: Partial<IciciBankExportConfig>) => {
     if (!isSuperAdmin) throw new Error('Unauthorized');
-    setIciciConfig((prev) => ({
-      ...prev,
-      ...cfg,
-      updatedAt: new Date().toISOString(),
-    }));
+    const patch = { ...cfg, updatedAt: new Date().toISOString() };
+    setIciciConfig((prev) => ({ ...prev, ...patch }));
+    if (firebaseUser) saveDoc(BANK_CONFIG_COL, ICICI_DOC_ID, patch);
     logAction('ICICI_CONFIG_SAVED', 'BANK_EXPORT', 'Updated ICICI salary payment configuration');
   };
 
   const recordBankExport = async (exportItem: IciciBankExportConfig['history'][0]) => {
     if (!isSuperAdmin) throw new Error('Unauthorized');
-    setIciciConfig((prev) => ({
-      ...prev,
-      history: [exportItem, ...(prev.history || [])],
-    }));
+    const newHistory = [exportItem, ...(iciciConfig.history || [])];
+    setIciciConfig((prev) => ({ ...prev, history: newHistory }));
+    if (firebaseUser) saveDoc(BANK_CONFIG_COL, ICICI_DOC_ID, { history: newHistory });
     logAction(
       'ICICI_EXPORT_RECORDED',
       'BANK_EXPORT',
@@ -694,6 +778,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       createdAt: new Date().toISOString(),
     };
     setSchools((prev) => [newSchool, ...prev]);
+    if (firebaseUser) saveDoc(COL.schools, newSchool.id, newSchool);
     logAction('SCHOOL_ADDED', 'SCHOOL', `Added school partner record: ${newSchool.name}`, newSchool.id);
     return newSchool;
   };
@@ -703,6 +788,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setSchools((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
     );
+    if (firebaseUser) saveDoc(COL.schools, id, updates);
     logAction('SCHOOL_UPDATED', 'SCHOOL', `Updated school record`, id);
   };
 
@@ -730,6 +816,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       updatedAt: new Date().toISOString(),
     };
     setExpenses((prev) => [newClaim, ...prev]);
+    if (firebaseUser) saveDoc(COL.expenses, newClaim.id, newClaim);
     logAction(
       'EXPENSE_SUBMITTED',
       'EXPENSE',
@@ -762,6 +849,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       updatedAt: new Date().toISOString(),
     };
     setExpenses((prev) => [draftClaim, ...prev]);
+    if (firebaseUser) saveDoc(COL.expenses, draftClaim.id, draftClaim);
     logAction('EXPENSE_DRAFT_SAVED', 'EXPENSE', `Saved expense claim draft ${draftClaim.id}`, draftClaim.id);
     return draftClaim;
   };
@@ -772,20 +860,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     comments?: string
   ): Promise<void> => {
     if (isEmployee) throw new Error('Unauthorized');
-    setExpenses((prev) =>
-      prev.map((c) => {
-        if (c.id !== expenseId) return c;
-        return {
-          ...c,
-          status,
-          paymentStatus: status === 'APPROVED' ? 'PENDING_PAYMENT' : 'UNPAID',
-          reviewedAt: new Date().toISOString(),
-          reviewedBy: currentUser?.email || 'operator@funscholar.com',
-          reviewerComments: comments,
-          updatedAt: new Date().toISOString(),
-        };
-      })
-    );
+    const patch = {
+      status,
+      paymentStatus: status === 'APPROVED' ? 'PENDING_PAYMENT' as const : 'UNPAID' as const,
+      reviewedAt: new Date().toISOString(),
+      reviewedBy: currentUser?.email || 'operator@funscholar.com',
+      reviewerComments: comments,
+      updatedAt: new Date().toISOString(),
+    };
+    setExpenses((prev) => prev.map((c) => (c.id === expenseId ? { ...c, ...patch } : c)));
+    if (firebaseUser) saveDoc(COL.expenses, expenseId, patch);
     logAction(
       status === 'APPROVED' ? 'EXPENSE_APPROVED' : 'EXPENSE_REJECTED',
       'EXPENSE',
@@ -796,37 +880,29 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const markExpensePaid = async (expenseId: string, paymentRef?: string): Promise<void> => {
     if (!isSuperAdmin) throw new Error('Unauthorized');
-    setExpenses((prev) =>
-      prev.map((c) => {
-        if (c.id !== expenseId) return c;
-        return {
-          ...c,
-          paymentStatus: 'PAID',
-          paidAt: new Date().toISOString(),
-          paidBy: currentUser?.email || 'info@funscholar.com',
-          paymentReference: paymentRef || `ICICI-REF-${Date.now().toString(36).toUpperCase()}`,
-          updatedAt: new Date().toISOString(),
-        };
-      })
-    );
+    const patch = {
+      paymentStatus: 'PAID' as const,
+      paidAt: new Date().toISOString(),
+      paidBy: currentUser?.email || 'info@funscholar.com',
+      paymentReference: paymentRef || `ICICI-REF-${Date.now().toString(36).toUpperCase()}`,
+      updatedAt: new Date().toISOString(),
+    };
+    setExpenses((prev) => prev.map((c) => (c.id === expenseId ? { ...c, ...patch } : c)));
+    if (firebaseUser) saveDoc(COL.expenses, expenseId, patch);
     logAction('EXPENSE_PAID', 'EXPENSE', `Marked expense claim ${expenseId} as PAID`, expenseId);
   };
 
   const updateIciciTxtConfig = async (cfg: Partial<IciciTxtBatchConfig>): Promise<void> => {
     if (!isSuperAdmin) throw new Error('Unauthorized');
-    setIciciTxtConfig((prev) => ({
-      ...prev,
-      ...cfg,
-    }));
+    setIciciTxtConfig((prev) => ({ ...prev, ...cfg }));
+    if (firebaseUser) saveDoc(BANK_CONFIG_COL, ICICI_TXT_DOC_ID, cfg);
     logAction('ICICI_TXT_CONFIG_UPDATED', 'BANK_EXPORT', 'Updated ICICI CIB TXT batch configuration');
   };
 
   const updateSystemSettings = async (newSettings: Partial<SystemSettings>) => {
     if (!isSuperAdmin) throw new Error('Unauthorized');
-    setSystemSettings((prev) => ({
-      ...prev,
-      ...newSettings,
-    }));
+    setSystemSettings((prev) => ({ ...prev, ...newSettings }));
+    if (firebaseUser) saveDoc(SETTINGS_COL, SETTINGS_DOC_ID, newSettings);
     logAction('SETTINGS_UPDATED', 'SETTINGS', 'System & Attendance settings updated');
   };
 
@@ -835,6 +911,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       value={{
         currentUser,
         firebaseUser,
+        isDbConnected,
+        authReady,
         activeRole,
         isSuperAdmin,
         isDataOperator,
