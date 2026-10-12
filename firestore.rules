@@ -67,12 +67,26 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Pending employee accounts (issued logins)
+    match /pending_accounts/{uid} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        request.auth.uid == uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword', 'onboardingSubmitted'])
+      );
+      allow delete: if isAdmin();
+    }
+
     // Employee master records
     match /employees/{employeeId} {
       allow read: if isOperator() || (
         isSignedIn() && resource.data.userId == request.auth.uid
       );
-      allow create: if isAdmin() || isOperator();
+      allow create: if isAdmin() || isOperator() || (
+        isSignedIn() && request.resource.data.userId == request.auth.uid
+      );
       allow update: if isOperator() || (
         isSignedIn() &&
         resource.data.userId == request.auth.uid &&

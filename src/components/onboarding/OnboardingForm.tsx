@@ -14,19 +14,20 @@ import {
 } from 'lucide-react';
 
 interface Props {
-  onCancel: () => void;
-  onSuccess: () => void;
+  onCancel?: () => void;
+  onSuccess?: () => void;
+  isSelfService?: boolean;
 }
 
-export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
-  const { addEmployee, uploadDocument } = useAuth();
+export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess, isSelfService }) => {
+  const { addEmployee, uploadDocument, markOnboardingSubmitted, firebaseUser } = useAuth();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [submitting, setSubmitting] = useState(false);
 
   // Step 1: Personal Info
   const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(isSelfService && firebaseUser?.email ? firebaseUser.email : '');
   const [mobile, setMobile] = useState('');
   const [dob, setDob] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
@@ -68,10 +69,13 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
     try {
       const isWib = bankIfsc.trim().toUpperCase().startsWith('ICIC');
       const resolvedRoute: 'WIB' | 'NEFT' = transactionRoute || (isWib ? 'WIB' : 'NEFT');
+      const targetUserId = isSelfService ? (firebaseUser?.uid || undefined) : undefined;
+      const targetEmail = (isSelfService && firebaseUser?.email) ? firebaseUser.email : email;
 
       const newEmp = await addEmployee({
+        userId: targetUserId,
         fullName,
-        email,
+        email: targetEmail,
         mobile,
         dob,
         photoUrl: photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
@@ -121,6 +125,7 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
           const meta = await uploadEmployeeDocumentFile(newEmp.id, u.docType, u.file);
           await uploadDocument({
             employeeId: newEmp.id,
+            userId: targetUserId,
             docType: u.docType,
             title: u.title,
             fileName: meta.fileName,
@@ -138,7 +143,11 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
         }
       }
 
-      onSuccess();
+      if (isSelfService && firebaseUser?.uid) {
+        await markOnboardingSubmitted(firebaseUser.uid);
+      }
+
+      onSuccess?.();
     } catch (err) {
       console.error(err);
     } finally {
@@ -152,18 +161,23 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-            Employee Onboarding Portal
+            {isSelfService ? 'Self-Service Employee Onboarding' : 'Employee Onboarding Portal'}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Collect personal information, employment terms, and statutory verification documents.
+            {isSelfService
+              ? 'Please submit your personal information, address, and statutory banking & ID documents for review.'
+              : 'Collect personal information, employment terms, and statutory verification documents.'}
           </p>
         </div>
-        <button
-          onClick={onCancel}
-          className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg"
-        >
-          Cancel
-        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg"
+          >
+            Cancel
+          </button>
+        )}
       </div>
 
       {/* Stepper Progress */}
@@ -246,11 +260,21 @@ export const OnboardingForm: React.FC<Props> = ({ onCancel, onSuccess }) => {
                   <input
                     type="email"
                     required
+                    readOnly={isSelfService}
                     placeholder="anand.murthy@funscholar.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900 ${
+                      isSelfService
+                        ? 'bg-slate-100 text-slate-700 font-mono cursor-not-allowed select-none'
+                        : 'bg-slate-50'
+                    }`}
                   />
+                  {isSelfService && (
+                    <span className="text-[10px] text-slate-400 mt-1 block">
+                      Locked to your verified login credentials ({email}).
+                    </span>
+                  )}
                 </div>
 
                 <div>

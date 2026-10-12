@@ -71,6 +71,16 @@ export interface UserProfile {
   updatedAt?: string;
 }
 
+export interface PendingAccount {
+  id?: string;
+  uid: string;
+  email: string;
+  invitedBy: string; // admin's email
+  invitedAt: string; // ISO timestamp
+  mustChangePassword: boolean; // true at creation
+  onboardingSubmitted: boolean; // false at creation
+}
+
 export interface EmployeeDocument {
   id: string;
   employeeId: string;

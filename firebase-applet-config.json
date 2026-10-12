@@ -1,9 +1,12 @@
 {
   "projectId": "employee-erp-system",
-  "appId": "1:144437284895:web:94e0d363b8caf71ae3452a",
+  "appId": "1:144437284895:web:89f007a515a73368e3452a",
   "apiKey": "AIzaSyCDTJ1zEEiHarDMTF92G2ImogAo1D9VwjU",
   "authDomain": "employee-erp-system.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-staffmanagementp-e4840044-6199-4181-8dd8-fc8252074f3c",
   "storageBucket": "employee-erp-system.firebasestorage.app",
   "messagingSenderId": "144437284895",
-  "measurementId": ""
+  "measurementId": "",
+  "oAuthClientId": "144437284895-qctiobn0bf04vp2rd158ejp8i1cbco7g.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
 }

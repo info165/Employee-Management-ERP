@@ -17,6 +17,7 @@ import {
   BadgeAlert,
   Receipt,
   GraduationCap,
+  KeyRound,
 } from 'lucide-react';
 
 export type NavigationTab =
@@ -24,6 +25,7 @@ export type NavigationTab =
   | 'employees'
   | 'schools'
   | 'onboard-new'
+  | 'create-login'
   | 'attendance'
   | 'clock-in'
   | 'requests'
@@ -43,10 +45,14 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => {
-  const { activeRole, isSuperAdmin, isDataOperator, isEmployee, expenses } = useAuth();
+  const { activeRole, isSuperAdmin, isDataOperator, isEmployee, expenses, pendingAccounts } = useAuth();
 
   const pendingExpensesCount = expenses.filter(
     (e) => e.status === 'SUBMITTED' || e.status === 'UNDER_REVIEW'
+  ).length;
+
+  const pendingReviewCount = pendingAccounts.filter(
+    (a) => a.onboardingSubmitted
   ).length;
 
   return (
@@ -125,6 +131,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
                   <UserPlus className="w-4 h-4 text-slate-400" />
                   <span>New Onboarding</span>
                 </button>
+
+                {isSuperAdmin && (
+                  <button
+                    onClick={() => onSelectTab('create-login')}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                      currentTab === 'create-login'
+                        ? 'bg-slate-800 text-white font-semibold'
+                        : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <KeyRound className="w-4 h-4 text-amber-400" />
+                      <span>Issue Employee Login</span>
+                    </div>
+                    {pendingReviewCount > 0 && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30 rounded-full font-mono">
+                        {pendingReviewCount}
+                      </span>
+                    )}
+                  </button>
+                )}
               </>
             )}
 

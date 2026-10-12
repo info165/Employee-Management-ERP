@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   ChevronRight,
   Landmark,
+  KeyRound,
 } from 'lucide-react';
 import { ApprovalModal } from './ApprovalModal';
 import { DocumentViewerModal } from './DocumentViewerModal';
@@ -21,9 +22,10 @@ import { BankProfileModal } from './BankProfileModal';
 
 interface Props {
   onOpenNewOnboarding: () => void;
+  onOpenCreateLogin?: () => void;
 }
 
-export const EmployeeDirectory: React.FC<Props> = ({ onOpenNewOnboarding }) => {
+export const EmployeeDirectory: React.FC<Props> = ({ onOpenNewOnboarding, onOpenCreateLogin }) => {
   const { employees, isSuperAdmin, isDataOperator } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');

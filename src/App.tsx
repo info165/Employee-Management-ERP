@@ -20,10 +20,24 @@ import { MyDocuments } from './components/employee/MyDocuments';
 import { MyPayslips } from './components/employee/MyPayslips';
 import { ExpenseClaimsManager } from './components/expenses/ExpenseClaimsManager';
 import { SchoolsDirectory } from './components/schools/SchoolsDirectory';
+import { CreateEmployeeLogin } from './components/admin/CreateEmployeeLogin';
+import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
+import { SelfServiceOnboarding } from './components/onboarding/SelfServiceOnboarding';
+import { PendingReviewScreen } from './components/auth/PendingReviewScreen';
 import { ShieldCheck, UserCheck, User } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { activeRole, isSuperAdmin, isDataOperator, isEmployee, authReady } = useAuth();
+  const {
+    activeRole,
+    isSuperAdmin,
+    isDataOperator,
+    isEmployee,
+    currentEmployee,
+    firebaseUser,
+    currentPendingAccount,
+    pendingAccounts,
+    authReady,
+  } = useAuth();
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
 
   // Wait until Firebase has told us whether a saved sign-in exists before
@@ -38,6 +52,38 @@ const MainLayout: React.FC = () => {
         </div>
       </div>
     );
+  }
+
+  // Identify real signed-in non-admin identity
+  const isRealNonAdmin = !!firebaseUser && firebaseUser.email !== 'info@funscholar.com';
+
+  // ======================================================================
+  // ROUTING GUARD: GATES DAILY-USE SCREENS FOR EMPLOYEE SELF-SERVICE LIFECYCLE
+  // ======================================================================
+  if (isRealNonAdmin) {
+    const userPendingAccount =
+      currentPendingAccount ||
+      pendingAccounts.find(
+        (p) =>
+          p.uid === firebaseUser.uid ||
+          p.email.toLowerCase() === firebaseUser.email?.toLowerCase()
+      );
+
+    // 1. Force password change on first login before anything else
+    if (userPendingAccount?.mustChangePassword) {
+      return <ForcePasswordChange />;
+    }
+
+    // 2. Self-service onboarding form if no employee record exists yet
+    if (!currentEmployee) {
+      return <SelfServiceOnboarding />;
+    }
+
+    // 3. Pending Review screen: blocks dashboard, attendance punch, history,
+    //    requests, expenses, payslips, and documents until Super Admin approves them
+    if (currentEmployee.onboardingStatus !== 'APPROVED' || !currentEmployee.accountActivated) {
+      return <PendingReviewScreen employee={currentEmployee} />;
+    }
   }
 
   return (
@@ -63,7 +109,14 @@ const MainLayout: React.FC = () => {
             )}
 
             {currentTab === 'employees' && (
-              <EmployeeDirectory onOpenNewOnboarding={() => setCurrentTab('onboard-new')} />
+              <EmployeeDirectory
+                onOpenNewOnboarding={() => setCurrentTab('onboard-new')}
+                onOpenCreateLogin={() => setCurrentTab('create-login')}
+              />
+            )}
+
+            {currentTab === 'create-login' && isSuperAdmin && (
+              <CreateEmployeeLogin />
             )}
 
             {currentTab === 'schools' && <SchoolsDirectory />}

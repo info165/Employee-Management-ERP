@@ -35,8 +35,18 @@ import {
   INITIAL_ICICI_TXT_CONFIG,
 } from '../lib/seedData';
 import { auth, testConnection } from '../lib/firebase';
-import { GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged, User } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  updatePassword,
+  signOut as fbSignOut,
+  onAuthStateChanged,
+  User,
+} from 'firebase/auth';
+import { provisionFirebaseUser } from '../lib/accountProvisioning';
 import { watchCollection, watchDoc, saveDoc } from '../lib/firestoreSync';
+import { PendingAccount } from '../types';
 
 // Firestore collection / doc names, matching firestore.rules exactly.
 const COL = {
@@ -50,6 +60,7 @@ const COL = {
   schools: 'schools',
   expenses: 'expenses',
   auditLogs: 'audit_logs',
+  pendingAccounts: 'pending_accounts',
 } as const;
 const SETTINGS_COL = 'system_settings';
 const SETTINGS_DOC_ID = 'main';
@@ -68,9 +79,17 @@ interface AuthContextType {
   isEmployee: boolean;
   currentEmployee: Employee | null;
   
+  // Pending account & self-service state
+  pendingAccounts: PendingAccount[];
+  currentPendingAccount: PendingAccount | null;
+  createEmployeeLogin: (email: string, password: string) => Promise<{ uid: string }>;
+  completePasswordChange: (newPassword: string) => Promise<void>;
+  markOnboardingSubmitted: (uid: string) => Promise<void>;
+  
   // Role switching for rapid evaluation & testing
   switchRole: (role: UserRole, targetEmployeeId?: string) => void;
   signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 
   // Data state
@@ -163,6 +182,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [schools, setSchools] = useState<School[]>(INITIAL_SCHOOLS);
   const [expenses, setExpenses] = useState<ExpenseClaim[]>(INITIAL_EXPENSES);
   const [iciciTxtConfig, setIciciTxtConfig] = useState<IciciTxtBatchConfig>(INITIAL_ICICI_TXT_CONFIG);
+  const [pendingAccounts, setPendingAccounts] = useState<PendingAccount[]>([]);
+  const [currentPendingAccount, setCurrentPendingAccount] = useState<PendingAccount | null>(null);
 
   // Active current profile
   const [currentUser, setCurrentUser] = useState<UserProfile>({
@@ -265,6 +286,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ),
     ];
 
+    const isEmailAdmin = firebaseUser.email === BOOTSTRAP_ADMIN_EMAIL;
+    if (isEmailAdmin) {
+      unsubscribers.push(
+        watchCollection<PendingAccount>(COL.pendingAccounts, setPendingAccounts)
+      );
+    } else {
+      unsubscribers.push(
+        watchDoc<PendingAccount>(COL.pendingAccounts, firebaseUser.uid, (data) => {
+          setCurrentPendingAccount(data);
+        })
+      );
+    }
+
     return () => {
       unsubscribers.forEach((unsub) => unsub());
       // Signing out stops saving anything, so leaving the last-synced real
@@ -284,15 +318,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setSchools(INITIAL_SCHOOLS);
       setExpenses(INITIAL_EXPENSES);
       setIciciTxtConfig(INITIAL_ICICI_TXT_CONFIG);
+      setPendingAccounts([]);
+      setCurrentPendingAccount(null);
     };
   }, [firebaseUser]);
 
   const isDbConnected = !!firebaseUser;
-  const isSuperAdmin = activeRole === 'SUPER_ADMIN';
-  const isDataOperator = activeRole === 'DATA_OPERATOR';
-  const isEmployee = activeRole === 'EMPLOYEE';
+  const isRealNonAdmin = !!firebaseUser && firebaseUser.email !== BOOTSTRAP_ADMIN_EMAIL;
+  const isSuperAdmin = !isRealNonAdmin && activeRole === 'SUPER_ADMIN';
+  const isDataOperator = !isRealNonAdmin && activeRole === 'DATA_OPERATOR';
+  const isEmployee = isRealNonAdmin || activeRole === 'EMPLOYEE';
 
-  const currentEmployee = employees.find((e) => e.id === activeEmployeeId) || employees[0] || null;
+  // Requirement 7:
+  // For a real signed-in non-admin user, currentEmployee resolves by matching
+  // employees.userId === firebaseUser.uid — not by the demo switcher.
+  // Keep the demo switcher working as-is for the Super Admin's own internal testing/preview use.
+  const currentEmployee = isRealNonAdmin
+    ? (employees.find((e) => e.userId === firebaseUser.uid) || null)
+    : (employees.find((e) => e.id === activeEmployeeId) || employees[0] || null);
 
   const logAction = (
     action: string,
@@ -368,14 +411,89 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const signInWithEmail = async (email: string, password: string): Promise<void> => {
+    try {
+      const res = await signInWithEmailAndPassword(auth, email.trim(), password);
+      logAction('USER_LOGIN', 'AUTH', `Email login success: ${res.user.email}`);
+    } catch (err) {
+      console.error('Sign in error:', err);
+      logAction('USER_LOGIN', 'AUTH', `Email login failed: ${err instanceof Error ? err.message : String(err)}`, undefined, 'FAILURE');
+      throw err;
+    }
+  };
+
   const signOut = async () => {
     try {
       await fbSignOut(auth);
+      setCurrentPendingAccount(null);
       switchRole('SUPER_ADMIN');
       logAction('USER_LOGOUT', 'AUTH', 'User signed out');
     } catch (err) {
       console.error('Sign out error:', err);
     }
+  };
+
+  const createEmployeeLogin = async (email: string, password: string): Promise<{ uid: string }> => {
+    if (!isSuperAdmin) throw new Error('Unauthorized: Only Super Admin can issue employee logins');
+    const trimmedEmail = email.trim().toLowerCase();
+
+    // Call the isolated secondary Firebase App instance so the Super Admin's
+    // primary session is NEVER disturbed
+    const uid = await provisionFirebaseUser(trimmedEmail, password);
+
+    const pendingDoc: PendingAccount = {
+      id: uid,
+      uid,
+      email: trimmedEmail,
+      invitedBy: currentUser?.email || BOOTSTRAP_ADMIN_EMAIL,
+      invitedAt: new Date().toISOString(),
+      mustChangePassword: true,
+      onboardingSubmitted: false,
+    };
+
+    setPendingAccounts((prev) => [pendingDoc, ...prev.filter((p) => p.uid !== uid)]);
+    if (firebaseUser) {
+      saveDoc(COL.pendingAccounts, uid, pendingDoc);
+    }
+
+    logAction(
+      'EMPLOYEE_LOGIN_ISSUED',
+      'AUTH',
+      `Issued new employee login for ${trimmedEmail} (UID: ${uid}) with initial temporary password`,
+      uid
+    );
+
+    return { uid };
+  };
+
+  const completePasswordChange = async (newPassword: string): Promise<void> => {
+    if (!auth.currentUser) throw new Error('No authenticated user session found');
+    await updatePassword(auth.currentUser, newPassword);
+
+    const uid = auth.currentUser.uid;
+    const patch = { mustChangePassword: false };
+
+    if (firebaseUser) {
+      saveDoc(COL.pendingAccounts, uid, patch);
+    }
+
+    setCurrentPendingAccount((prev) => (prev ? { ...prev, mustChangePassword: false } : null));
+    setPendingAccounts((prev) =>
+      prev.map((p) => (p.uid === uid ? { ...p, mustChangePassword: false } : p))
+    );
+
+    logAction('PASSWORD_UPDATED', 'AUTH', `User ${auth.currentUser.email} set permanent password`, uid);
+  };
+
+  const markOnboardingSubmitted = async (uid: string): Promise<void> => {
+    const patch = { onboardingSubmitted: true };
+    if (firebaseUser) {
+      saveDoc(COL.pendingAccounts, uid, patch);
+    }
+    setCurrentPendingAccount((prev) => (prev ? { ...prev, onboardingSubmitted: true } : null));
+    setPendingAccounts((prev) =>
+      prev.map((p) => (p.uid === uid ? { ...p, onboardingSubmitted: true } : p))
+    );
   };
 
   const addEmployee = async (
@@ -1023,8 +1141,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isDataOperator,
         isEmployee,
         currentEmployee,
+        pendingAccounts,
+        currentPendingAccount,
+        createEmployeeLogin,
+        completePasswordChange,
+        markOnboardingSubmitted,
         switchRole,
         signInWithGoogle,
+        signInWithEmail,
         signOut,
         employees,
         documents,
